@@ -20,3 +20,7 @@ redirect_urls = ["https://bulk-editor-app-production.up.railway.app/auth/callbac
 
 [build]
 automatically_update_urls_on_dev = true
+
+[[webhooks.subscriptions]]
+topics = ["products/update"]
+uri = "/webhooks/products/update"
