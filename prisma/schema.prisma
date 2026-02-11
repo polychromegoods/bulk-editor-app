@@ -1,0 +1,103 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Session {
+  id            String    @id
+  shop          String
+  state         String
+  isOnline      Boolean   @default(false)
+  scope         String?
+  expires       DateTime?
+  accessToken   String
+  userId        BigInt?
+  firstName     String?
+  lastName      String?
+  email         String?
+  accountOwner  Boolean   @default(false)
+  locale        String?
+  collaborator  Boolean?  @default(false)
+  emailVerified Boolean?  @default(false)
+  refreshToken          String?
+  refreshTokenExpires   DateTime?
+}
+
+model ShopPlan {
+  id              String   @id @default(cuid())
+  shop            String   @unique
+  plan            String   @default("free") // free, pro, plus
+  chargeId        String?
+  trialUsed       Boolean  @default(false)
+  monthlyEdits    Int      @default(0)
+  monthlyEditReset DateTime @default(now())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model BulkEdit {
+  id          String   @id @default(cuid())
+  shop        String
+  name        String
+  status      String   @default("completed")
+  productCount Int     @default(0)
+  changes     String   @default("[]")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model AutomationRule {
+  id          String   @id @default(cuid())
+  shop        String
+  name        String
+  enabled     Boolean  @default(true)
+  conditions  String   @default("[]")
+  actions     String   @default("[]")
+  lastRun     DateTime?
+  runCount    Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model ScheduledEdit {
+  id          String   @id @default(cuid())
+  shop        String
+  name        String
+  status      String   @default("pending")
+  scheduledFor DateTime
+  changes     String   @default("[]")
+  productCount Int     @default(0)
+  executedAt  DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model PriceHistory {
+  id          String   @id @default(cuid())
+  shop        String
+  productId   String
+  variantId   String
+  productTitle String
+  variantTitle String?
+  oldPrice    String
+  newPrice    String
+  changeType  String   @default("manual")
+  changeSource String  @default("bulk_edit")
+  createdAt   DateTime @default(now())
+}
+
+model SavedSearch {
+  id          String   @id @default(cuid())
+  shop        String
+  name        String
+  query       String   @default("{}")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}

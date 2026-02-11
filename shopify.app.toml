@@ -1,0 +1,22 @@
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+client_id = "e3f26ab623e119763b2c1302ac80b389"
+name = "bulk-editor-app"
+application_url = "https://example.com"
+embedded = true
+
+[webhooks]
+api_version = "2026-04"
+
+  [[webhooks.subscriptions]]
+  compliance_topics = ["customers/data_request", "customers/redact", "shop/redact"]
+  uri = "/webhooks/gdpr"
+
+[access_scopes]
+# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
+scopes = "read_products,write_products"
+
+[auth]
+redirect_urls = [ "https://example.com/api/auth" ]
+
+[build]
+automatically_update_urls_on_dev = true

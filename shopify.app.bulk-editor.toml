@@ -1,0 +1,25 @@
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
+
+client_id = "bc70b84717589ea74efc85b305279f03"
+name = "Bulk Editor"
+application_url = "https://bulk-editor-app.fly.dev:63224"
+embedded = true
+
+[webhooks]
+api_version = "2026-01"
+
+[access_scopes]
+# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
+scopes = ""
+optional_scopes = [ ]
+use_legacy_install_flow = false
+
+[auth]
+redirect_urls = [
+  "https://bulk-editor-app.fly.dev/auth/callback",
+  "https://bulk-editor-app.fly.dev/auth/shopify/callback",
+  "https://bulk-editor-app.fly.dev/api/auth/callback"
+]
+
+[build]
+automatically_update_urls_on_dev = true
