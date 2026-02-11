@@ -2,7 +2,12 @@ import { useState, useEffect } from "react";
 import { useLoaderData, useFetcher, useNavigate } from "react-router";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
-import { authenticate, PLAN_NAMES } from "../shopify.server";
+import { authenticate } from "../shopify.server";
+
+const PLAN_NAMES = {
+  PRO: "Pro Plan",
+  PLUS: "Plus Plan",
+};
 import prisma from "../db.server";
 
 /* ───────── Plan Definitions ───────── */
