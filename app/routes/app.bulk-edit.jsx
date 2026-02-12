@@ -151,7 +151,7 @@ export const action = async ({ request }) => {
     for (const [productId, productChanges] of Object.entries(changesByProduct)) {
       try {
         // Separate product-level and variant-level changes
-        const productLevelChanges = productChanges.filter(c => ["title", "vendor", "productType", "status", "tags"].includes(c.field));
+        const productLevelChanges = productChanges.filter(c => ["title", "vendor", "productType", "status", "tags", "templateSuffix"].includes(c.field));
         const variantLevelChanges = productChanges.filter(c => ["price", "compareAtPrice", "sku", "barcode", "weight", "taxable"].includes(c.field));
 
         // Apply product-level changes
@@ -163,12 +163,13 @@ export const action = async ({ request }) => {
             else if (change.field === "productType") productInput.productType = change.newValue;
             else if (change.field === "status") productInput.status = change.newValue;
             else if (change.field === "tags") productInput.tags = change.newValue.split(",").map(t => t.trim()).filter(Boolean);
+            else if (change.field === "templateSuffix") productInput.templateSuffix = change.newValue;
           }
 
           const productMutation = `#graphql
             mutation productUpdate($input: ProductInput!) {
               productUpdate(input: $input) {
-                product { id title vendor productType status tags }
+                product { id title vendor productType status tags templateSuffix }
                 userErrors { field message }
               }
             }`;
@@ -209,6 +210,7 @@ export const action = async ({ request }) => {
             else if (change.field === "compareAtPrice") v.compareAtPrice = change.newValue;
             else if (change.field === "sku") v.sku = change.newValue;
             else if (change.field === "barcode") v.barcode = change.newValue;
+            else if (change.field === "weight") v.weight = parseFloat(change.newValue);
 
           }
 
@@ -218,7 +220,7 @@ export const action = async ({ request }) => {
             mutation productVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
               productVariantsBulkUpdate(productId: $productId, variants: $variants) {
                 product { id }
-                productVariants { id price compareAtPrice sku barcode }
+                productVariants { id price compareAtPrice sku barcode weight weightUnit }
                 userErrors { field message }
               }
             }`;
@@ -347,6 +349,7 @@ const EDITABLE_FIELDS = [
   // Text (variant-level)
   { value: "sku", label: "SKU", icon: "🔢", category: "text", level: "variant", accessor: (v) => v.sku || "" },
   { value: "barcode", label: "Barcode", icon: "📊", category: "text", level: "variant", accessor: (v) => v.barcode || "" },
+  { value: "weight", label: "Weight", icon: "⚖️", category: "numeric", level: "variant", accessor: (v) => v.weight || "0" },
   // Text (product-level)
   { value: "title", label: "Title", icon: "📝", category: "text", level: "product", accessor: null },
   { value: "vendor", label: "Vendor", icon: "🏢", category: "text", level: "product", accessor: null },
@@ -355,6 +358,7 @@ const EDITABLE_FIELDS = [
   { value: "tags", label: "Tags", icon: "🏷️", category: "tags", level: "product", accessor: null },
   // Select (product-level)
   { value: "status", label: "Status", icon: "🔄", category: "select", level: "product", accessor: null, options: ["ACTIVE", "DRAFT", "ARCHIVED"] },
+  { value: "templateSuffix", label: "Product Template", icon: "📄", category: "text", level: "product", accessor: null },
 ];
 
 const NUMERIC_CHANGE_TYPES = [
@@ -411,6 +415,8 @@ const FILTER_FIELDS = [
   { value: "price", label: "Price", type: "number" },
   { value: "compareAtPrice", label: "Compare-at Price", type: "number" },
   { value: "inventoryQuantity", label: "Inventory", type: "number" },
+  { value: "weight", label: "Weight", type: "number" },
+  { value: "templateSuffix", label: "Product Template", type: "text" },
 ];
 
 const TEXT_OPERATORS = [
@@ -461,6 +467,12 @@ function evaluateFilter(product, rule) {
       break;
     case "sku":
       value = product.variants?.edges?.[0]?.node?.sku || "";
+      break;
+    case "weight":
+      value = String(product.variants?.edges?.[0]?.node?.weight ?? "0");
+      break;
+    case "templateSuffix":
+      value = product.templateSuffix || "";
       break;
     case "variantTitle":
       value = (product.variants?.edges || []).map(e => e.node?.title || "").join(", ");
