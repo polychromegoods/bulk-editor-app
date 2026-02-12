@@ -177,8 +177,10 @@ export const action = async ({ request }) => {
       });
       return { success: true, autoApproved: true };
     } catch (err) {
-      console.error("Billing request error:", err);
-      return { error: err.message || "Failed to create billing request. Use Test Mode to switch plans for development." };
+      console.error("[Billing] Subscribe error for shop:", shop, "plan:", planName);
+      console.error("[Billing] Error details:", JSON.stringify(err, Object.getOwnPropertyNames(err), 2));
+      console.error("[Billing] Stack:", err.stack);
+      return { error: `Error while billing the store: ${err.message || "Unknown error"}. Please try again or contact support.` };
     }
   }
 

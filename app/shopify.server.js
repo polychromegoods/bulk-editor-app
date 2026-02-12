@@ -3,6 +3,7 @@ import {
   ApiVersion,
   AppDistribution,
   BillingInterval,
+  BillingReplacementBehavior,
   shopifyApp,
 } from "@shopify/shopify-app-react-router/server";
 import { PrismaSessionStorage } from "@shopify/shopify-app-session-storage-prisma";
@@ -22,20 +23,24 @@ const shopify = shopifyApp({
   distribution: AppDistribution.AppStore,
   billing: {
     [PLAN_NAMES.PRO]: {
+      replacementBehavior: BillingReplacementBehavior.ApplyImmediately,
+      trialDays: 7,
       lineItems: [
         {
+          interval: BillingInterval.Every30Days,
           amount: 9.99,
           currencyCode: "USD",
-          interval: BillingInterval.Every30Days,
         },
       ],
     },
     [PLAN_NAMES.PLUS]: {
+      replacementBehavior: BillingReplacementBehavior.ApplyImmediately,
+      trialDays: 7,
       lineItems: [
         {
+          interval: BillingInterval.Every30Days,
           amount: 19.99,
           currencyCode: "USD",
-          interval: BillingInterval.Every30Days,
         },
       ],
     },
