@@ -8,48 +8,62 @@ import prisma from "../db.server";
 export const loader = async ({ request }) => {
   const { admin, session } = await authenticate.admin(request);
 
-  const response = await admin.graphql(
-    `#graphql
-    query ($first: Int!) {
-      products(first: $first) {
-        edges {
-          node {
-            id
-            title
-            handle
-            status
-            productType
-            vendor
-            tags
-            featuredMedia {
-              preview {
-                image {
-                  url
-                  altText
+  // Paginate through ALL products
+  let allProducts = [];
+  let hasNextPage = true;
+  let cursor = null;
+  while (hasNextPage) {
+    const response = await admin.graphql(
+      `#graphql
+      query ($first: Int!, $after: String) {
+        products(first: $first, after: $after) {
+          pageInfo {
+            hasNextPage
+            endCursor
+          }
+          edges {
+            node {
+              id
+              title
+              handle
+              status
+              productType
+              vendor
+              tags
+              featuredMedia {
+                preview {
+                  image {
+                    url
+                    altText
+                  }
                 }
               }
-            }
-            variants(first: 100) {
-              edges {
-                node {
-                  id
-                  title
-                  price
-                  compareAtPrice
-                  sku
-                  barcode
-                  inventoryQuantity
+              variants(first: 100) {
+                edges {
+                  node {
+                    id
+                    title
+                    price
+                    compareAtPrice
+                    sku
+                    barcode
+                    inventoryQuantity
+                  }
                 }
               }
             }
           }
         }
-      }
-    }`,
-    { variables: { first: 250 } }
-  );
-  const data = await response.json();
-  const products = (data.data?.products?.edges || []).map((e) => e.node);
+      }`,
+      { variables: { first: 250, after: cursor } }
+    );
+    const data = await response.json();
+    const edges = data.data?.products?.edges || [];
+    allProducts = allProducts.concat(edges.map((e) => e.node));
+    hasNextPage = data.data?.products?.pageInfo?.hasNextPage || false;
+    cursor = data.data?.products?.pageInfo?.endCursor || null;
+  }
+  const products = allProducts;
 
   const vendors = [...new Set(products.map((p) => p.vendor).filter(Boolean))].sort();
   const productTypes = [...new Set(products.map((p) => p.productType).filter(Boolean))].sort();
@@ -393,6 +407,7 @@ const FILTER_FIELDS = [
   { value: "status", label: "Status", type: "select", options: ["ACTIVE", "DRAFT", "ARCHIVED"] },
   { value: "tags", label: "Tags", type: "text" },
   { value: "sku", label: "SKU", type: "text" },
+  { value: "variantTitle", label: "Variant Title", type: "text" },
   { value: "price", label: "Price", type: "number" },
   { value: "compareAtPrice", label: "Compare-at Price", type: "number" },
   { value: "inventoryQuantity", label: "Inventory", type: "number" },
@@ -446,6 +461,9 @@ function evaluateFilter(product, rule) {
       break;
     case "sku":
       value = product.variants?.edges?.[0]?.node?.sku || "";
+      break;
+    case "variantTitle":
+      value = (product.variants?.edges || []).map(e => e.node?.title || "").join(", ");
       break;
     case "tags":
       value = (product.tags || []).join(", ");
