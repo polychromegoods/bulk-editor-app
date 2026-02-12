@@ -1209,6 +1209,7 @@ export default function BulkEdit() {
                           <optgroup label="Variant Fields">
                             <option value="sku">SKU</option>
                             <option value="barcode">Barcode</option>
+                            <option value="weight">Weight</option>
                           </optgroup>
                           <optgroup label="Product Fields">
                             <option value="title">Title</option>
@@ -1216,6 +1217,7 @@ export default function BulkEdit() {
                             <option value="productType">Product Type</option>
                             <option value="tags">Tags</option>
                             <option value="status">Status</option>
+                            <option value="templateSuffix">Product Template</option>
                           </optgroup>
                         </select>
                       </div>
