@@ -708,10 +708,16 @@ export default function BulkEdit() {
         case "decrease_fixed": r = c - v; break;
         default: r = c;
       }
-      if (mod.rounding === "99") r = Math.floor(r) + 0.99;
-      else if (mod.rounding === "95") r = Math.floor(r) + 0.95;
-      else if (mod.rounding === "whole") r = Math.round(r);
-      return Math.max(0, r).toFixed(2);
+      const priceFields = ["price", "compareAtPrice", "cost"];
+      if (priceFields.includes(mod.field)) {
+        if (mod.rounding === "99") r = Math.floor(r) + 0.99;
+        else if (mod.rounding === "95") r = Math.floor(r) + 0.95;
+        else if (mod.rounding === "whole") r = Math.round(r);
+        return Math.max(0, r).toFixed(2);
+      }
+      // Non-price numeric: no forced decimals
+      r = Math.max(0, r);
+      return r % 1 === 0 ? String(r) : String(parseFloat(r.toFixed(4)));
     }
 
     if (fieldDef.category === "text") {
