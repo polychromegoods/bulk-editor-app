@@ -48,6 +48,8 @@ export const loader = async ({ request }) => {
                     sku
                     barcode
                     inventoryQuantity
+                    weight
+                    weightUnit
                   }
                 }
               }
@@ -349,7 +351,7 @@ const EDITABLE_FIELDS = [
   // Text (variant-level)
   { value: "sku", label: "SKU", icon: "🔢", category: "text", level: "variant", accessor: (v) => v.sku || "" },
   { value: "barcode", label: "Barcode", icon: "📊", category: "text", level: "variant", accessor: (v) => v.barcode || "" },
-  { value: "weight", label: "Weight", icon: "⚖️", category: "numeric", level: "variant", accessor: (v) => v.weight || "0" },
+  { value: "weight", label: "Weight", icon: "⚖️", category: "numeric", level: "variant", accessor: (v) => v.weight != null ? String(v.weight) : "0" },
   // Text (product-level)
   { value: "title", label: "Title", icon: "📝", category: "text", level: "product", accessor: null },
   { value: "vendor", label: "Vendor", icon: "🏢", category: "text", level: "product", accessor: null },
