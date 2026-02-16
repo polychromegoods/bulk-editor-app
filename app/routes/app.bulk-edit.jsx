@@ -926,7 +926,12 @@ export default function BulkEdit() {
   const formatValue = (fieldValue, val) => {
     const f = getFieldDef(fieldValue);
     if (!f) return val;
-    if (f.category === "numeric") return `$${val}`;
+    if (f.category === "numeric") {
+      const priceFields = ["price", "compareAtPrice", "cost"];
+      if (priceFields.includes(fieldValue)) return `$${val}`;
+      // Non-price numeric fields: show plain number
+      return val === "" || val === null || val === undefined ? "0" : String(val);
+    }
     if (val === "") return "(empty)";
     if (val && val.length > 50) return val.substring(0, 50) + "...";
     return val;
@@ -953,7 +958,8 @@ export default function BulkEdit() {
     const pctChange = totalOld > 0 ? ((totalNew - totalOld) / totalOld * 100).toFixed(1) : "0.0";
     const avgOld = numericChanges.length > 0 ? (totalOld / numericChanges.length).toFixed(2) : "0.00";
     const avgNew = numericChanges.length > 0 ? (totalNew / numericChanges.length).toFixed(2) : "0.00";
-    return { netChange, pctChange, avgOld, avgNew, increases, decreases, unchanged };
+    const hasPriceFields = numericChanges.some(c => ["price", "compareAtPrice", "cost"].includes(c.field));
+    return { netChange, pctChange, avgOld, avgNew, increases, decreases, unchanged, hasPriceFields };
   }, [changes]);
 
   return (
@@ -1232,7 +1238,7 @@ export default function BulkEdit() {
                     <div style={{ display: "grid", gridTemplateColumns: isFindReplace ? "1fr 1fr" : isNumeric ? "1fr 1fr" : "1fr", gap: "12px", marginTop: "12px" }}>
                       <div>
                         <div style={{ fontSize: "13px", fontWeight: 600, marginBottom: "4px" }}>
-                          {isFindReplace ? "Find" : "Value"} {isNumeric && mod.type.includes("percent") ? "(%)" : isNumeric ? "($)" : ""}
+                          {isFindReplace ? "Find" : "Value"} {isNumeric && mod.type.includes("percent") ? "(%)" : (mod.field === "price" || mod.field === "compareAtPrice" || mod.field === "cost") ? "($)" : ""}
                         </div>
                         {isSelect ? (
                           <select value={mod.value} onChange={(e) => { updateMod(mod.id, "value", e.target.value); setActivePreset(null); }} style={styles.select}>
@@ -1242,7 +1248,7 @@ export default function BulkEdit() {
                         ) : (
                           <input
                             type={isNumeric ? "number" : "text"}
-                            placeholder={isNumeric ? (mod.type === "exact" ? "e.g., 29.99" : mod.type.includes("percent") ? "e.g., 10" : "e.g., 5.00") : mod.field === "tags" ? "e.g., sale, clearance" : "Enter value..."}
+                            placeholder={isNumeric ? (mod.type.includes("percent") ? "e.g., 10" : mod.field === "weight" ? "e.g., 1.5" : mod.field === "inventoryQuantity" ? "e.g., 100" : mod.type === "exact" ? "e.g., 29.99" : "e.g., 5.00") : mod.field === "tags" ? "e.g., sale, clearance" : "Enter value..."}
                             value={mod.value}
                             onChange={(e) => { updateMod(mod.id, "value", e.target.value); setActivePreset(null); }}
                             style={styles.input}
@@ -1257,7 +1263,7 @@ export default function BulkEdit() {
                           <input type="text" placeholder="Replacement text..." value={mod.value2 || ""} onChange={(e) => updateMod(mod.id, "value2", e.target.value)} style={styles.input} />
                         </div>
                       )}
-                      {isNumeric && !isFindReplace && (
+                      {isNumeric && !isFindReplace && (mod.field === "price" || mod.field === "compareAtPrice" || mod.field === "cost") && (
                         <div>
                           <div style={{ fontSize: "13px", fontWeight: 600, marginBottom: "4px" }}>Rounding</div>
                           <select value={mod.rounding} onChange={(e) => { updateMod(mod.id, "rounding", e.target.value); setActivePreset(null); }} style={styles.select}>
@@ -1389,9 +1395,9 @@ export default function BulkEdit() {
                 </div>
                 <div style={styles.summaryCard("#2c6ecb")}>
                   <div style={{ fontSize: "28px", fontWeight: 700 }}>
-                    {parseFloat(priceImpact.netChange) > 0 ? "+" : ""}${priceImpact.netChange}
+                    {parseFloat(priceImpact.netChange) > 0 ? "+" : ""}{priceImpact.hasPriceFields ? "$" : ""}{priceImpact.netChange}
                   </div>
-                  <div style={{ fontSize: "12px", color: "#637381", marginTop: "4px" }}>Net Price Change ({priceImpact.pctChange}%)</div>
+                  <div style={{ fontSize: "12px", color: "#637381", marginTop: "4px" }}>Net Change ({priceImpact.pctChange}%)</div>
                 </div>
               </div>
             </s-box>
