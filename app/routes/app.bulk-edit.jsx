@@ -48,8 +48,14 @@ export const loader = async ({ request }) => {
                     sku
                     barcode
                     inventoryQuantity
-                    weight
-                    weightUnit
+                    inventoryItem {
+                      measurement {
+                        weight {
+                          value
+                          unit
+                        }
+                      }
+                    }
                   }
                 }
               }
@@ -212,7 +218,14 @@ export const action = async ({ request }) => {
             else if (change.field === "compareAtPrice") v.compareAtPrice = change.newValue;
             else if (change.field === "sku") v.sku = change.newValue;
             else if (change.field === "barcode") v.barcode = change.newValue;
-            else if (change.field === "weight") v.weight = parseFloat(change.newValue);
+            else if (change.field === "weight") {
+              v.inventoryItem = v.inventoryItem || {};
+              v.inventoryItem.measurement = v.inventoryItem.measurement || {};
+              v.inventoryItem.measurement.weight = {
+                value: parseFloat(change.newValue),
+                unit: "POUNDS",
+              };
+            }
 
           }
 
@@ -222,7 +235,7 @@ export const action = async ({ request }) => {
             mutation productVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
               productVariantsBulkUpdate(productId: $productId, variants: $variants) {
                 product { id }
-                productVariants { id price compareAtPrice sku barcode weight weightUnit }
+                productVariants { id price compareAtPrice sku barcode inventoryItem { measurement { weight { value unit } } } }
                 userErrors { field message }
               }
             }`;
@@ -351,7 +364,7 @@ const EDITABLE_FIELDS = [
   // Text (variant-level)
   { value: "sku", label: "SKU", icon: "🔢", category: "text", level: "variant", accessor: (v) => v.sku || "" },
   { value: "barcode", label: "Barcode", icon: "📊", category: "text", level: "variant", accessor: (v) => v.barcode || "" },
-  { value: "weight", label: "Weight", icon: "⚖️", category: "numeric", level: "variant", accessor: (v) => v.weight != null ? String(v.weight) : "0" },
+  { value: "weight", label: "Weight", icon: "⚖️", category: "numeric", level: "variant", accessor: (v) => { const w = v.inventoryItem?.measurement?.weight?.value; return w != null ? String(w) : "0"; } },
   // Text (product-level)
   { value: "title", label: "Title", icon: "📝", category: "text", level: "product", accessor: null },
   { value: "vendor", label: "Vendor", icon: "🏢", category: "text", level: "product", accessor: null },
@@ -471,7 +484,7 @@ function evaluateFilter(product, rule) {
       value = product.variants?.edges?.[0]?.node?.sku || "";
       break;
     case "weight":
-      value = String(product.variants?.edges?.[0]?.node?.weight ?? "0");
+      value = String(product.variants?.edges?.[0]?.node?.inventoryItem?.measurement?.weight?.value ?? "0");
       break;
     case "templateSuffix":
       value = product.templateSuffix || "";
