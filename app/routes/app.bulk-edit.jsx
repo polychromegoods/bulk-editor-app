@@ -8,68 +8,79 @@ import prisma from "../db.server";
 export const loader = async ({ request }) => {
   const { admin, session } = await authenticate.admin(request);
 
-  // Paginate through ALL products
-  let allProducts = [];
-  let hasNextPage = true;
-  let cursor = null;
-  while (hasNextPage) {
-    const response = await admin.graphql(
-      `#graphql
-      query ($first: Int!, $after: String) {
-        products(first: $first, after: $after) {
-          pageInfo {
-            hasNextPage
-            endCursor
-          }
-          edges {
-            node {
-              id
-              title
-              handle
-              status
-              productType
-              vendor
-              tags
-              featuredMedia {
-                preview {
-                  image {
-                    url
-                    altText
-                  }
-                }
-              }
-              variants(first: 100) {
-                edges {
-                  node {
-                    id
-                    title
-                    price
-                    compareAtPrice
-                    sku
-                    barcode
-                    inventoryQuantity
-                    inventoryItem {
-                      measurement {
-                        weight {
-                          value
-                          unit
-                        }
-                      }
-                    }
-                  }
+  // Product query WITH weight (requires read_inventory scope)
+  const PRODUCTS_QUERY_WITH_WEIGHT = `#graphql
+    query ($first: Int!, $after: String) {
+      products(first: $first, after: $after) {
+        pageInfo { hasNextPage endCursor }
+        edges {
+          node {
+            id title handle status productType vendor tags
+            featuredMedia { preview { image { url altText } } }
+            variants(first: 100) {
+              edges {
+                node {
+                  id title price compareAtPrice sku barcode inventoryQuantity
+                  inventoryItem { measurement { weight { value unit } } }
                 }
               }
             }
           }
         }
-      }`,
-      { variables: { first: 250, after: cursor } }
-    );
-    const data = await response.json();
-    const edges = data.data?.products?.edges || [];
-    allProducts = allProducts.concat(edges.map((e) => e.node));
-    hasNextPage = data.data?.products?.pageInfo?.hasNextPage || false;
-    cursor = data.data?.products?.pageInfo?.endCursor || null;
+      }
+    }`;
+
+  // Fallback query WITHOUT weight (if read_inventory scope not granted)
+  const PRODUCTS_QUERY_NO_WEIGHT = `#graphql
+    query ($first: Int!, $after: String) {
+      products(first: $first, after: $after) {
+        pageInfo { hasNextPage endCursor }
+        edges {
+          node {
+            id title handle status productType vendor tags
+            featuredMedia { preview { image { url altText } } }
+            variants(first: 100) {
+              edges {
+                node {
+                  id title price compareAtPrice sku barcode inventoryQuantity
+                }
+              }
+            }
+          }
+        }
+      }
+    }`;
+
+  // Paginate through ALL products, fallback to no-weight query if scope missing
+  let allProducts = [];
+  let hasNextPage = true;
+  let cursor = null;
+  let useWeightQuery = true;
+  while (hasNextPage) {
+    try {
+      const response = await admin.graphql(
+        useWeightQuery ? PRODUCTS_QUERY_WITH_WEIGHT : PRODUCTS_QUERY_NO_WEIGHT,
+        { variables: { first: 250, after: cursor } }
+      );
+      const data = await response.json();
+      // Check for GraphQL errors (e.g., scope issues)
+      if (data.errors && data.errors.length > 0 && useWeightQuery) {
+        console.warn("Weight query failed, falling back to no-weight query:", data.errors[0]?.message);
+        useWeightQuery = false;
+        continue; // retry this page with fallback query
+      }
+      const edges = data.data?.products?.edges || [];
+      allProducts = allProducts.concat(edges.map((e) => e.node));
+      hasNextPage = data.data?.products?.pageInfo?.hasNextPage || false;
+      cursor = data.data?.products?.pageInfo?.endCursor || null;
+    } catch (err) {
+      if (useWeightQuery) {
+        console.warn("Weight query threw error, falling back to no-weight query:", err.message);
+        useWeightQuery = false;
+        continue; // retry this page with fallback query
+      }
+      throw err; // re-throw if fallback also fails
+    }
   }
   const products = allProducts;
 
