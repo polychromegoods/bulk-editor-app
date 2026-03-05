@@ -9,7 +9,11 @@ api_version = "2026-04"
 
   [[webhooks.subscriptions]]
   compliance_topics = ["customers/data_request", "customers/redact", "shop/redact"]
-  uri = "/webhooks/gdpr"
+  uri = "https://bulk-editor-app-production.up.railway.app/webhooks/gdpr"
+
+  [[webhooks.subscriptions]]
+  topics = ["products/update"]
+  uri = "/webhooks/products/update"
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
@@ -20,7 +24,3 @@ redirect_urls = ["https://bulk-editor-app-production.up.railway.app/auth/callbac
 
 [build]
 automatically_update_urls_on_dev = true
-
-[[webhooks.subscriptions]]
-topics = ["products/update"]
-uri = "/webhooks/products/update"
