@@ -4,23 +4,24 @@ name = "bulk-editor-app"
 application_url = "https://bulk-editor-app-production.up.railway.app"
 embedded = true
 
-[webhooks]
-api_version = "2026-04"
-
-  [[webhooks.subscriptions]]
-  compliance_topics = ["customers/data_request", "customers/redact", "shop/redact"]
-  uri = "https://bulk-editor-app-production.up.railway.app/webhooks/gdpr"
-
-  [[webhooks.subscriptions]]
-  topics = ["products/update"]
-  uri = "/webhooks/products/update"
-
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
 scopes = "read_products,write_products,read_inventory,write_inventory"
 
 [auth]
 redirect_urls = ["https://bulk-editor-app-production.up.railway.app/auth/callback", "https://bulk-editor-app-production.up.railway.app/auth/shopify/callback", "https://bulk-editor-app-production.up.railway.app/api/auth/callback"]
+
+[webhooks]
+api_version = "2026-04"
+
+  [[webhooks.subscriptions]]
+  topics = ["app/uninstalled"]
+  compliance_topics = ["customers/data_request", "customers/redact", "shop/redact"]
+  uri = "/webhooks/gdpr"
+
+  [[webhooks.subscriptions]]
+  topics = ["products/update"]
+  uri = "/webhooks/products/update"
 
 [build]
 automatically_update_urls_on_dev = true
