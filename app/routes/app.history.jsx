@@ -39,20 +39,32 @@ export const loader = async ({ request }) => {
 
   const totalPages = Math.ceil(totalCount / pageSize);
 
-  // Compute summary stats
-  const allHistory = await prisma.priceHistory.findMany({
-    where: { shop },
-    select: { oldPrice: true, newPrice: true, changeSource: true },
-  });
-
-  let totalSaved = 0;
-  let totalIncreased = 0;
-  let decreaseCount = 0;
-  let increaseCount = 0;
-  for (const h of allHistory) {
-    const diff = parseFloat(h.newPrice) - parseFloat(h.oldPrice);
-    if (diff < 0) { totalSaved += Math.abs(diff); decreaseCount++; }
-    if (diff > 0) { totalIncreased += diff; increaseCount++; }
+  // Compute summary stats using efficient aggregate query instead of loading all records
+  let stats = { totalChanges: 0, decreaseCount: 0, increaseCount: 0, totalSaved: "0.00", totalIncreased: "0.00" };
+  try {
+    const totalChanges = await prisma.priceHistory.count({ where: { shop } });
+    const statsResult = await prisma.$queryRawUnsafe(
+      `SELECT 
+        COALESCE(SUM(CASE WHEN CAST("newPrice" AS DOUBLE PRECISION) < CAST("oldPrice" AS DOUBLE PRECISION) THEN 1 ELSE 0 END), 0) as decrease_count,
+        COALESCE(SUM(CASE WHEN CAST("newPrice" AS DOUBLE PRECISION) > CAST("oldPrice" AS DOUBLE PRECISION) THEN 1 ELSE 0 END), 0) as increase_count,
+        COALESCE(SUM(CASE WHEN CAST("newPrice" AS DOUBLE PRECISION) < CAST("oldPrice" AS DOUBLE PRECISION) THEN CAST("oldPrice" AS DOUBLE PRECISION) - CAST("newPrice" AS DOUBLE PRECISION) ELSE 0 END), 0) as total_saved,
+        COALESCE(SUM(CASE WHEN CAST("newPrice" AS DOUBLE PRECISION) > CAST("oldPrice" AS DOUBLE PRECISION) THEN CAST("newPrice" AS DOUBLE PRECISION) - CAST("oldPrice" AS DOUBLE PRECISION) ELSE 0 END), 0) as total_increased
+      FROM "PriceHistory" WHERE shop = $1`,
+      shop
+    );
+    if (statsResult && statsResult.length > 0) {
+      const row = statsResult[0];
+      stats = {
+        totalChanges,
+        decreaseCount: Number(row.decrease_count),
+        increaseCount: Number(row.increase_count),
+        totalSaved: Number(row.total_saved).toFixed(2),
+        totalIncreased: Number(row.total_increased).toFixed(2),
+      };
+    }
+  } catch (err) {
+    console.error("Stats query failed, using fallback:", err.message);
+    stats.totalChanges = totalCount;
   }
 
   return {
@@ -63,13 +75,7 @@ export const loader = async ({ request }) => {
     search,
     source,
     bulkEdits,
-    stats: {
-      totalChanges: allHistory.length,
-      decreaseCount,
-      increaseCount,
-      totalSaved: totalSaved.toFixed(2),
-      totalIncreased: totalIncreased.toFixed(2),
-    },
+    stats,
   };
 };
 
