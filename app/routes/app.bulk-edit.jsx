@@ -986,7 +986,18 @@ export default function BulkEdit() {
       else if (n < o) decreases++;
       else unchanged++;
     }
-    const netChange = (totalNew - totalOld).toFixed(2);
+    const rawNetChange = totalNew - totalOld;
+    // Format large numbers compactly to prevent overflow
+    const formatCompact = (num) => {
+      const abs = Math.abs(num);
+      if (abs >= 1e15) return (num / 1e12).toFixed(1) + "T";
+      if (abs >= 1e12) return (num / 1e12).toFixed(2) + "T";
+      if (abs >= 1e9) return (num / 1e9).toFixed(2) + "B";
+      if (abs >= 1e6) return (num / 1e6).toFixed(2) + "M";
+      if (abs >= 1e5) return (num / 1e3).toFixed(1) + "K";
+      return num.toFixed(2);
+    };
+    const netChange = formatCompact(rawNetChange);
     const pctChange = totalOld > 0 ? ((totalNew - totalOld) / totalOld * 100).toFixed(1) : "0.0";
     const avgOld = numericChanges.length > 0 ? (totalOld / numericChanges.length).toFixed(2) : "0.00";
     const avgNew = numericChanges.length > 0 ? (totalNew / numericChanges.length).toFixed(2) : "0.00";
@@ -1426,8 +1437,8 @@ export default function BulkEdit() {
                   <div style={{ fontSize: "12px", color: "#637381", marginTop: "4px" }}>Products</div>
                 </div>
                 <div style={styles.summaryCard("#2c6ecb")}>
-                  <div style={{ fontSize: "28px", fontWeight: 700 }}>
-                    {parseFloat(priceImpact.netChange) > 0 ? "+" : ""}{priceImpact.hasPriceFields ? "$" : ""}{priceImpact.netChange}
+                  <div style={{ fontSize: "28px", fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%" }} title={priceImpact.netChange}>
+                    {String(priceImpact.netChange).charAt(0) !== "-" && parseFloat(priceImpact.netChange) > 0 ? "+" : ""}{priceImpact.hasPriceFields ? "$" : ""}{priceImpact.netChange}
                   </div>
                   <div style={{ fontSize: "12px", color: "#637381", marginTop: "4px" }}>Net Change ({priceImpact.pctChange}%)</div>
                 </div>

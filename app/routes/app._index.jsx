@@ -142,8 +142,14 @@ export default function Dashboard() {
             </div>
             <div style={{ fontSize: "14px", color: "#202223" }}>
               <strong>{monthlyEdits}</strong> / {editsLimit === Infinity ? "∞" : editsLimit} bulk edits used this month
-              {editsRemaining !== "∞" && (
+              {editsRemaining !== "∞" && monthlyEdits < editsLimit && (
                 <span style={{ color: "#637381" }}> · {editsRemaining} remaining</span>
+              )}
+              {editsLimit !== Infinity && monthlyEdits >= editsLimit && (
+                <span style={{ color: "#d72c0d", fontWeight: 600 }}> · Limit reached — upgrade to continue</span>
+              )}
+              {editsLimit !== Infinity && monthlyEdits < editsLimit && usagePercent > 80 && (
+                <span style={{ color: "#b98900", fontWeight: 600 }}> · Running low — consider upgrading</span>
               )}
             </div>
           </div>

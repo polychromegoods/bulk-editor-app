@@ -148,28 +148,24 @@ export const action = async ({ request }) => {
     const shopPlan = await prisma.shopPlan.findUnique({ where: { shop } });
     const trialDays = shopPlan?.trialUsed ? 0 : 7;
 
+    // Mark trial as used before billing request
+    await prisma.shopPlan.upsert({
+      where: { shop },
+      update: { trialUsed: true },
+      create: { shop, trialUsed: true },
+    });
+
     try {
-      const response = await billing.request({
+      // billing.request() throws a redirect Response that React Router catches.
+      // It returns Promise<never> — it does NOT return a URL.
+      await billing.request({
         plan: planName,
         isTest: true,
         returnUrl: `https://${shop}/admin/apps/${process.env.SHOPIFY_API_KEY || "bulk-editor"}/app/billing-callback?plan=${planKey}`,
         trialDays,
       });
 
-      // Mark trial as used
-      await prisma.shopPlan.upsert({
-        where: { shop },
-        update: { trialUsed: true },
-        create: { shop, trialUsed: true },
-      });
-
-      // billing.request returns the confirmation URL directly or an object with confirmationUrl
-      const confirmationUrl = typeof response === "string" ? response : response?.confirmationUrl;
-      if (confirmationUrl) {
-        return { redirect: confirmationUrl };
-      }
-
-      // If billing.request didn't return a URL, the plan might have been auto-approved
+      // If we somehow get here (shouldn't happen), treat as auto-approved
       await prisma.shopPlan.upsert({
         where: { shop },
         update: { plan: planKey },
@@ -177,10 +173,15 @@ export const action = async ({ request }) => {
       });
       return { success: true, autoApproved: true };
     } catch (err) {
+      // billing.request() throws a Response object for the redirect.
+      // We MUST re-throw it so React Router handles the redirect to Shopify's billing page.
+      if (err instanceof Response) {
+        throw err;
+      }
       console.error("[Billing] Subscribe error for shop:", shop, "plan:", planName);
       console.error("[Billing] Error details:", JSON.stringify(err, Object.getOwnPropertyNames(err), 2));
       console.error("[Billing] Stack:", err.stack);
-      return { error: `Error while billing the store: ${err.message || "Unknown error"}. Please try again or contact support.` };
+      return { error: `Error while billing the store. Please try again or contact support.` };
     }
   }
 
@@ -281,8 +282,13 @@ export default function Billing() {
                   transition: "width 0.3s ease",
                 }} />
               </div>
-              {usagePercent > 80 && currentPlan !== "plus" && (
+              {currentPlan !== "plus" && monthlyEdits >= editsLimit && editsLimit !== Infinity && (
                 <div style={{ fontSize: "12px", color: "#d72c0d", marginTop: "4px", fontWeight: 600 }}>
+                  Limit reached — upgrade to continue
+                </div>
+              )}
+              {currentPlan !== "plus" && monthlyEdits < editsLimit && usagePercent > 80 && (
+                <div style={{ fontSize: "12px", color: "#b98900", marginTop: "4px", fontWeight: 600 }}>
                   Running low — consider upgrading
                 </div>
               )}
