@@ -1,5 +1,5 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
-client_id = "b0572cc58eaf4f3b720a6b82a27338ab"
+client_id = "e3f26ab623e119763b2c1302ac80b389"
 name = "Bulk Editor Pro"
 application_url = "https://bulk-editor-app-production.up.railway.app"
 embedded = true
