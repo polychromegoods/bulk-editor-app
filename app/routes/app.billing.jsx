@@ -148,49 +148,67 @@ export const action = async ({ request }) => {
     const shopPlan = await prisma.shopPlan.findUnique({ where: { shop } });
     const trialDays = shopPlan?.trialUsed ? 0 : 7;
 
-    // Mark trial as used before billing request
-    await prisma.shopPlan.upsert({
-      where: { shop },
-      update: { trialUsed: true },
-      create: { shop, trialUsed: true },
-    });
-
     try {
-      // billing.request() throws a redirect Response that React Router catches.
-      // It returns Promise<never> — it does NOT return a URL.
+      // billing.request() internally calls the Shopify GraphQL billing mutation,
+      // then throws a redirect Response that React Router catches.
+      // The returnUrl should point back to our app's billing callback.
+      // For embedded apps, use the Shopify admin URL format.
+      const appHandle = process.env.SHOPIFY_API_KEY || "bulk-editor";
+      const returnUrl = `https://admin.shopify.com/store/${shop.replace(".myshopify.com", "")}/apps/${appHandle}/app/billing-callback?plan=${planKey}`;
+
+      console.log("[Billing] Requesting billing for shop:", shop, "plan:", planName, "returnUrl:", returnUrl, "trialDays:", trialDays);
+
       await billing.request({
         plan: planName,
         isTest: true,
-        returnUrl: `https://${shop}/admin/apps/${process.env.SHOPIFY_API_KEY || "bulk-editor"}/app/billing-callback?plan=${planKey}`,
+        returnUrl,
         trialDays,
       });
 
-      // If we somehow get here (shouldn't happen), treat as auto-approved
+      // If we somehow get here (shouldn't happen — billing.request always throws),
+      // treat as auto-approved
       await prisma.shopPlan.upsert({
         where: { shop },
-        update: { plan: planKey },
-        create: { shop, plan: planKey },
+        update: { plan: planKey, trialUsed: true },
+        create: { shop, plan: planKey, trialUsed: true },
       });
       return { success: true, autoApproved: true };
     } catch (err) {
       // billing.request() throws a Response object for the redirect.
       // We MUST re-throw it so React Router handles the redirect to Shopify's billing page.
       if (err instanceof Response) {
+        // Mark trial as used only after successful billing request
+        await prisma.shopPlan.upsert({
+          where: { shop },
+          update: { trialUsed: true },
+          create: { shop, trialUsed: true },
+        });
         throw err;
       }
+
+      // Log detailed error info for debugging
       console.error("[Billing] Subscribe error for shop:", shop, "plan:", planName);
-      console.error("[Billing] Error details:", JSON.stringify(err, Object.getOwnPropertyNames(err), 2));
-      console.error("[Billing] Stack:", err.stack);
-      return { error: `Error while billing the store. Please try again or contact support.` };
+      console.error("[Billing] Error name:", err?.constructor?.name);
+      console.error("[Billing] Error message:", err?.message);
+      if (err?.errorData) {
+        console.error("[Billing] Error data:", JSON.stringify(err.errorData, null, 2));
+      }
+      console.error("[Billing] Full error:", JSON.stringify(err, Object.getOwnPropertyNames(err), 2));
+
+      // Provide more specific error messages
+      const errorMsg = err?.errorData?.length
+        ? err.errorData.map(e => e.message || JSON.stringify(e)).join("; ")
+        : err?.message || "Unknown error";
+      return { error: `Billing error: ${errorMsg}. Please try again or contact support.` };
     }
   }
 
   if (intent === "cancel") {
     try {
-      // Reset to free plan
+      // Reset to free plan and reset edit counter to avoid showing e.g. 8/3
       await prisma.shopPlan.upsert({
         where: { shop },
-        update: { plan: "free", chargeId: null },
+        update: { plan: "free", chargeId: null, monthlyEdits: 0, monthlyEditReset: new Date() },
         create: { shop, plan: "free" },
       });
       return { success: true, cancelled: true };

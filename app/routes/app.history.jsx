@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useLoaderData, useFetcher, useNavigate } from "react-router";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
@@ -145,6 +145,64 @@ export default function History() {
   const shopify = useAppBridge();
   const [searchValue, setSearchValue] = useState(search);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const tableRef = useRef(null);
+
+  // Compact number formatter for large prices
+  const formatPrice = (priceStr) => {
+    const num = parseFloat(priceStr);
+    if (isNaN(num)) return priceStr;
+    if (Math.abs(num) >= 1e12) return `$${(num / 1e12).toFixed(1)}T`;
+    if (Math.abs(num) >= 1e9) return `$${(num / 1e9).toFixed(1)}B`;
+    if (Math.abs(num) >= 1e6) return `$${(num / 1e6).toFixed(1)}M`;
+    if (Math.abs(num) >= 1e4) return `$${num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    return `$${priceStr}`;
+  };
+
+  const formatDiff = (diff) => {
+    const abs = Math.abs(diff);
+    const sign = diff > 0 ? "+" : diff < 0 ? "-" : "";
+    if (abs >= 1e12) return `${sign}$${(abs / 1e12).toFixed(1)}T`;
+    if (abs >= 1e9) return `${sign}$${(abs / 1e9).toFixed(1)}B`;
+    if (abs >= 1e6) return `${sign}$${(abs / 1e6).toFixed(1)}M`;
+    if (abs >= 1e4) return `${sign}$${abs.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    return `${diff > 0 ? "+" : ""}${diff.toFixed(2)}`;
+  };
+
+  const handleNextPage = useCallback(() => {
+    if (page >= totalPages) return;
+    const params = new URLSearchParams();
+    params.set("page", String(page + 1));
+    if (search) params.set("search", search);
+    if (source) params.set("source", source);
+    navigate(`/app/history?${params.toString()}`);
+  }, [page, totalPages, search, source, navigate]);
+
+  const handlePrevPage = useCallback(() => {
+    if (page <= 1) return;
+    const params = new URLSearchParams();
+    params.set("page", String(page - 1));
+    if (search) params.set("search", search);
+    if (source) params.set("source", source);
+    navigate(`/app/history?${params.toString()}`);
+  }, [page, search, source, navigate]);
+
+  // Ref-based event listeners for s-table pagination (React 18 custom element event fix)
+  useEffect(() => {
+    const tableEl = tableRef.current;
+    if (!tableEl) return;
+    const onNext = () => handleNextPage();
+    const onPrev = () => handlePrevPage();
+    tableEl.addEventListener("nextpage", onNext);
+    tableEl.addEventListener("previouspage", onPrev);
+    tableEl.addEventListener("nextPage", onNext);
+    tableEl.addEventListener("previousPage", onPrev);
+    return () => {
+      tableEl.removeEventListener("nextpage", onNext);
+      tableEl.removeEventListener("previouspage", onPrev);
+      tableEl.removeEventListener("nextPage", onNext);
+      tableEl.removeEventListener("previousPage", onPrev);
+    };
+  }, [handleNextPage, handlePrevPage]);
 
   useEffect(() => {
     if (fetcher.data?.success && fetcher.data?.reverted) {
@@ -272,6 +330,7 @@ export default function History() {
       ) : (
         <s-section padding="none">
           <s-table
+            ref={tableRef}
             paginate={totalPages > 1}
             hasNextPage={page < totalPages}
             hasPreviousPage={page > 1}
@@ -282,6 +341,7 @@ export default function History() {
               <s-table-header format="currency">Old Price</s-table-header>
               <s-table-header format="currency">New Price</s-table-header>
               <s-table-header>Change</s-table-header>
+              <s-table-header>Edit Name</s-table-header>
               <s-table-header>Source</s-table-header>
               <s-table-header>Date</s-table-header>
               <s-table-header>Actions</s-table-header>
@@ -301,16 +361,20 @@ export default function History() {
                     <s-table-cell>
                       <s-text tone="subdued">{entry.variantTitle || "Default"}</s-text>
                     </s-table-cell>
-                    <s-table-cell>${entry.oldPrice}</s-table-cell>
+                    <s-table-cell>{formatPrice(entry.oldPrice)}</s-table-cell>
                     <s-table-cell>
-                      <s-text fontWeight="bold">${entry.newPrice}</s-text>
+                      <s-text fontWeight="bold">{formatPrice(entry.newPrice)}</s-text>
                     </s-table-cell>
                     <s-table-cell>
                       <s-text
                         tone={diff < 0 ? "critical" : diff > 0 ? "success" : "subdued"}
                       >
-                        {diff > 0 ? "+" : ""}
-                        {diff.toFixed(2)} ({pctChange}%)
+                        {formatDiff(diff)} ({pctChange}%)
+                      </s-text>
+                    </s-table-cell>
+                    <s-table-cell>
+                      <s-text tone="subdued" variant="bodySm">
+                        {entry.bulkEditName || "—"}
                       </s-text>
                     </s-table-cell>
                     <s-table-cell>

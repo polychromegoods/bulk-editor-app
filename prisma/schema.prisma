@@ -90,6 +90,8 @@ model PriceHistory {
   newPrice    String
   changeType  String   @default("manual")
   changeSource String  @default("bulk_edit")
+  bulkEditId  String?
+  bulkEditName String?
   createdAt   DateTime @default(now())
 }
 

@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { useLoaderData, useFetcher, useNavigate } from "react-router";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
@@ -165,6 +165,7 @@ export default function Products() {
   const [editingVariant, setEditingVariant] = useState(null);
   const [editPrice, setEditPrice] = useState("");
   const [expandedProduct, setExpandedProduct] = useState(null);
+  const tableRef = useRef(null);
 
   const handleSearch = useCallback(() => {
     const params = new URLSearchParams();
@@ -173,6 +174,7 @@ export default function Products() {
   }, [searchValue, navigate]);
 
   const handleNextPage = useCallback(() => {
+    if (!pageInfo.endCursor) return;
     const params = new URLSearchParams();
     params.set("cursor", pageInfo.endCursor);
     params.set("direction", "next");
@@ -181,12 +183,36 @@ export default function Products() {
   }, [pageInfo, searchValue, navigate]);
 
   const handlePrevPage = useCallback(() => {
+    if (!pageInfo.startCursor) return;
     const params = new URLSearchParams();
     params.set("cursor", pageInfo.startCursor);
     params.set("direction", "prev");
     if (searchValue) params.set("search", searchValue);
     navigate(`/app/products?${params.toString()}`);
   }, [pageInfo, searchValue, navigate]);
+
+  // Attach event listeners for s-table pagination using ref
+  // React 18 doesn't properly bind custom element events via JSX props
+  useEffect(() => {
+    const tableEl = tableRef.current;
+    if (!tableEl) return;
+
+    const onNext = () => handleNextPage();
+    const onPrev = () => handlePrevPage();
+
+    // Listen for both lowercase (web component standard) and camelCase variants
+    tableEl.addEventListener("nextpage", onNext);
+    tableEl.addEventListener("previouspage", onPrev);
+    tableEl.addEventListener("nextPage", onNext);
+    tableEl.addEventListener("previousPage", onPrev);
+
+    return () => {
+      tableEl.removeEventListener("nextpage", onNext);
+      tableEl.removeEventListener("previouspage", onPrev);
+      tableEl.removeEventListener("nextPage", onNext);
+      tableEl.removeEventListener("previousPage", onPrev);
+    };
+  }, [handleNextPage, handlePrevPage]);
 
   const startEditing = (productId, variantId, currentPrice) => {
     setEditingVariant(`${productId}:${variantId}`);
@@ -231,13 +257,20 @@ export default function Products() {
       </s-section>
 
       <s-section>
-        <s-text tone="subdued" variant="bodySm">
-          Click any price to edit it inline. For bulk changes, use the Bulk Edit button above.
-        </s-text>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <s-text tone="subdued" variant="bodySm">
+            Click any price to edit it inline. For bulk changes, use the Bulk Edit button above.
+          </s-text>
+          <s-text tone="subdued" variant="bodySm">
+            Showing {products.length} product{products.length !== 1 ? "s" : ""}
+            {(pageInfo.hasPreviousPage || pageInfo.hasNextPage) && " per page"}
+          </s-text>
+        </div>
       </s-section>
 
       <s-section padding="none">
         <s-table
+          ref={tableRef}
           paginate
           hasNextPage={pageInfo.hasNextPage}
           hasPreviousPage={pageInfo.hasPreviousPage}
@@ -252,7 +285,7 @@ export default function Products() {
           </s-table-header-row>
           <s-table-body>
             {products.map((product) => {
-              const variants = product.variants.edges;
+              const variants = product.variants?.edges || [];
               const firstVariant = variants[0]?.node;
               const imageUrl = product.featuredMedia?.preview?.image?.url;
               const hasMultipleVariants = variants.length > 1;
@@ -375,6 +408,49 @@ export default function Products() {
           </s-table-body>
         </s-table>
       </s-section>
+
+      {/* Manual pagination buttons as fallback */}
+      {(pageInfo.hasPreviousPage || pageInfo.hasNextPage) && (
+        <s-section>
+          <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: "12px", padding: "8px 0" }}>
+            <button
+              onClick={handlePrevPage}
+              disabled={!pageInfo.hasPreviousPage}
+              style={{
+                padding: "8px 16px",
+                borderRadius: "8px",
+                border: "1px solid #c4cdd5",
+                backgroundColor: pageInfo.hasPreviousPage ? "white" : "#f6f6f7",
+                color: pageInfo.hasPreviousPage ? "#202223" : "#babec3",
+                cursor: pageInfo.hasPreviousPage ? "pointer" : "default",
+                fontSize: "13px",
+                fontWeight: 600,
+              }}
+            >
+              ← Previous
+            </button>
+            <s-text tone="subdued" variant="bodySm">
+              {products.length} product{products.length !== 1 ? "s" : ""} shown
+            </s-text>
+            <button
+              onClick={handleNextPage}
+              disabled={!pageInfo.hasNextPage}
+              style={{
+                padding: "8px 16px",
+                borderRadius: "8px",
+                border: "1px solid #c4cdd5",
+                backgroundColor: pageInfo.hasNextPage ? "white" : "#f6f6f7",
+                color: pageInfo.hasNextPage ? "#202223" : "#babec3",
+                cursor: pageInfo.hasNextPage ? "pointer" : "default",
+                fontSize: "13px",
+                fontWeight: 600,
+              }}
+            >
+              Next →
+            </button>
+          </div>
+        </s-section>
+      )}
 
       {products.length === 0 && (
         <s-section>

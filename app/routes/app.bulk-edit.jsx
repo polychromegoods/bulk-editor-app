@@ -282,11 +282,8 @@ export const action = async ({ request }) => {
       }
     }
 
-    if (historyRecords.length > 0) {
-      await prisma.priceHistory.createMany({ data: historyRecords });
-    }
-
-    await prisma.bulkEdit.create({
+    // Create the BulkEdit record first so we can reference its ID in history
+    const bulkEditRecord = await prisma.bulkEdit.create({
       data: {
         shop: session.shop,
         name: editName,
@@ -295,6 +292,17 @@ export const action = async ({ request }) => {
         changes: JSON.stringify(changes.slice(0, 50)),
       },
     });
+
+    // Add bulkEditId and bulkEditName to all history records
+    const enrichedHistoryRecords = historyRecords.map(record => ({
+      ...record,
+      bulkEditId: bulkEditRecord.id,
+      bulkEditName: editName,
+    }));
+
+    if (enrichedHistoryRecords.length > 0) {
+      await prisma.priceHistory.createMany({ data: enrichedHistoryRecords });
+    }
 
     await prisma.shopPlan.update({
       where: { shop: session.shop },
