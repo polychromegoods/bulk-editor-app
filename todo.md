@@ -14,3 +14,7 @@
 - [x] BE-001: Loading indicator - Fixed with global overlay
 - [x] BE-002: History 502 - Fixed with SQL aggregates
 - [x] BE-S4-03: Net Change overflow - Fixed with compact number formatting
+
+## New Issues
+- [ ] Blank white screen on app load - app shows "Bulk Editor Pro" title but no content renders; no loading indicator visible
+- [ ] Add proper loading states/skeletons so users can distinguish loading from broken
