@@ -21,3 +21,7 @@
 - [x] AUTO-07: Automation rule not triggering - rewrote GraphQL mutations to multi-line format with debug logging
 - [x] EDGE-09: Long product titles now truncated with ellipsis (max 200px) and full title on hover
 - [x] GDPR webhook 401 errors - caused by old app's webhook subscriptions, resolved by deploying new app (Bulk Editor ProX)
+- [x] Create unit tests for core business logic (pricing calculations, rule matching, plan limits) — 84 tests
+- [x] Create integration tests for webhook handler and GraphQL mutation builders
+- [x] Create API smoke tests for Railway server health — 9 tests
+- [x] Set up GitHub Actions CI workflow (on push + daily schedule)

@@ -17,7 +17,11 @@
     "prisma": "prisma",
     "graphql-codegen": "graphql-codegen",
     "vite": "vite",
-    "typecheck": "react-router typegen && tsc --noEmit"
+    "typecheck": "react-router typegen && tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:unit": "vitest run tests/business-logic.test.mjs tests/webhook-handler.test.mjs",
+    "test:smoke": "vitest run tests/smoke.test.mjs"
   },
   "type": "module",
   "engines": {
@@ -59,7 +63,8 @@
     "graphql-config": "^5.1.1",
     "prettier": "^3.6.2",
     "typescript": "^5.9.3",
-    "vite": "^6.3.6"
+    "vite": "^6.3.6",
+    "vitest": "^4.1.0"
   },
   "workspaces": [
     "extensions/*"
