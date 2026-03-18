@@ -122,7 +122,8 @@ function calcValue(current, mod) {
 }
 
 async function applyModifications(admin, product, actions) {
-  const productInput = {}, variantUpdates = [];
+  const productInput = {};
+  const variantUpdates = [];
   for (const mod of actions) {
     const fieldDef = getFieldDef(mod.field);
     if (!fieldDef) continue;
@@ -130,11 +131,15 @@ async function applyModifications(admin, product, actions) {
       const currentValue = mod.field === "tags" ? (product.tags||[]).join(", ") : (product[mod.field]||"");
       const newValue = calcValue(currentValue, mod);
       if (newValue === null) continue;
-      if (mod.field === "tags") { productInput.tags = typeof newValue === "string" ? newValue.split(",").map(t=>t.trim()) : newValue; }
-      else { productInput[mod.field] = newValue; }
+      if (mod.field === "tags") {
+        productInput.tags = typeof newValue === "string" ? newValue.split(",").map(t=>t.trim()) : newValue;
+      } else {
+        productInput[mod.field] = newValue;
+      }
     } else if (fieldDef.level === "variant") {
       for (const edge of product.variants?.edges||[]) {
-        const variant = edge.node, currentValue = fieldDef.accessor ? fieldDef.accessor(variant) : variant[mod.field];
+        const variant = edge.node;
+        const currentValue = fieldDef.accessor ? fieldDef.accessor(variant) : variant[mod.field];
         const newValue = calcValue(currentValue, mod);
         if (newValue === null) continue;
         let existing = variantUpdates.find(v => v.id === variant.id);
@@ -143,10 +148,49 @@ async function applyModifications(admin, product, actions) {
       }
     }
   }
+
   if (Object.keys(productInput).length > 0) {
-    await admin.graphql(`#graphql mutation productUpdate($input: ProductInput!) { productUpdate(input: $input) { product { id } userErrors { field message } } }`, { variables: { input: { id: product.id, ...productInput } } });
+    console.log(`[Webhook] Applying product-level update to ${product.id}:`, JSON.stringify(productInput));
+    const productMutation = `
+      mutation productUpdate($input: ProductInput!) {
+        productUpdate(input: $input) {
+          product { id }
+          userErrors { field message }
+        }
+      }
+    `;
+    const result = await admin.graphql(productMutation, {
+      variables: { input: { id: product.id, ...productInput } },
+    });
+    const resultData = await result.json();
+    const userErrors = resultData.data?.productUpdate?.userErrors || [];
+    if (userErrors.length > 0) {
+      console.error(`[Webhook] Product update errors:`, JSON.stringify(userErrors));
+    }
   }
+
   if (variantUpdates.length > 0) {
-    await admin.graphql(`#graphql mutation productVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) { productVariantsBulkUpdate(productId: $productId, variants: $variants) { product { id } userErrors { field message } } }`, { variables: { productId: product.id, variants: variantUpdates } });
+    console.log(`[Webhook] Applying variant-level update to ${product.id}:`, JSON.stringify(variantUpdates));
+    const variantMutation = `
+      mutation productVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
+        productVariantsBulkUpdate(productId: $productId, variants: $variants) {
+          product { id }
+          productVariants { id price compareAtPrice sku barcode }
+          userErrors { field message }
+        }
+      }
+    `;
+    const result = await admin.graphql(variantMutation, {
+      variables: { productId: product.id, variants: variantUpdates },
+    });
+    const resultData = await result.json();
+    const userErrors = resultData.data?.productVariantsBulkUpdate?.userErrors || [];
+    if (userErrors.length > 0) {
+      console.error(`[Webhook] Variant update errors:`, JSON.stringify(userErrors));
+    }
+  }
+
+  if (Object.keys(productInput).length === 0 && variantUpdates.length === 0) {
+    console.log(`[Webhook] No modifications to apply for product ${product.id}`);
   }
 }

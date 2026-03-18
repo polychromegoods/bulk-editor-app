@@ -18,3 +18,6 @@
 ## New Issues
 - [ ] Blank white screen on app load - app shows "Bulk Editor Pro" title but no content renders; no loading indicator visible
 - [ ] Add proper loading states/skeletons so users can distinguish loading from broken
+- [x] AUTO-07: Automation rule not triggering - rewrote GraphQL mutations to multi-line format with debug logging
+- [x] EDGE-09: Long product titles now truncated with ellipsis (max 200px) and full title on hover
+- [x] GDPR webhook 401 errors - caused by old app's webhook subscriptions, resolved by deploying new app (Bulk Editor ProX)

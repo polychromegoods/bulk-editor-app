@@ -356,7 +356,11 @@ export default function History() {
                 return (
                   <s-table-row key={entry.id}>
                     <s-table-cell>
-                      <s-text fontWeight="bold">{entry.productTitle}</s-text>
+                      <s-text fontWeight="bold">
+                        <span style={{ display: "block", maxWidth: "200px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={entry.productTitle}>
+                          {entry.productTitle}
+                        </span>
+                      </s-text>
                     </s-table-cell>
                     <s-table-cell>
                       <s-text tone="subdued">{entry.variantTitle || "Default"}</s-text>
