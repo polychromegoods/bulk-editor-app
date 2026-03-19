@@ -26,3 +26,4 @@
 - [x] Create API smoke tests for Railway server health — 9 tests
 - [x] Set up GitHub Actions CI workflow (on push + daily schedule)
 - [x] BE-008-1/AUTO-07 Retest: Automation rule applies price changes but no PriceHistory record is created (schema mismatch in webhook handler)
+- [x] BE-009: Application Error "TypeError: Failed to fetch" on Bulk Edit page - investigated: server is healthy, error was caused by DevTools Offline throttle during QA testing
