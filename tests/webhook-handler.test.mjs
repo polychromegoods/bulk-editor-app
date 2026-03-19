@@ -370,3 +370,183 @@ describe("Webhook edge cases", () => {
     expect(variantUpdates).toHaveLength(0);
   });
 });
+
+/* ═══════════════════════════════════════════════════════════
+   6. PriceHistory Record Building (Bug BE-008-1 fix)
+   
+   Verifies that automation rules correctly build PriceHistory
+   records that match the database schema.
+   ═══════════════════════════════════════════════════════════ */
+import { buildPriceHistoryRecords } from "../app/lib/business-logic.js";
+
+const SHOP = "polychrome-dev-store-2.myshopify.com";
+
+describe("Webhook flow — PriceHistory record building", () => {
+  it("creates PriceHistory records for price changes", () => {
+    const actions = [
+      { field: "price", type: "exact", value: "12.99" },
+    ];
+
+    const records = buildPriceHistoryRecords(incomingProduct, actions, "QA 1", SHOP);
+
+    expect(records).toHaveLength(2); // 2 variants
+    for (const record of records) {
+      // Verify all required PriceHistory schema fields are present
+      expect(record).toHaveProperty("shop", SHOP);
+      expect(record).toHaveProperty("productId");
+      expect(record).toHaveProperty("variantId");
+      expect(record).toHaveProperty("productTitle");
+      expect(record).toHaveProperty("oldPrice");
+      expect(record).toHaveProperty("newPrice", "12.99");
+      expect(record).toHaveProperty("changeType", "automation");
+      expect(record).toHaveProperty("changeSource", "automation");
+      expect(record).toHaveProperty("bulkEditName", "Auto: QA 1");
+    }
+
+    // First variant: 49.99 → 12.99
+    expect(records[0].variantId).toBe("gid://shopify/ProductVariant/100001");
+    expect(records[0].oldPrice).toBe("49.99");
+    expect(records[0].variantTitle).toBe("Default");
+
+    // Second variant: 79.99 → 12.99
+    expect(records[1].variantId).toBe("gid://shopify/ProductVariant/100002");
+    expect(records[1].oldPrice).toBe("79.99");
+    expect(records[1].variantTitle).toBe("Premium");
+  });
+
+  it("creates PriceHistory records for percentage decrease", () => {
+    const actions = [
+      { field: "price", type: "decrease_percent", value: "10" },
+    ];
+
+    const records = buildPriceHistoryRecords(incomingProduct, actions, "Discount Rule", SHOP);
+
+    expect(records).toHaveLength(2);
+
+    // 49.99 * 0.9 = 44.991 → 44.99
+    expect(records[0].oldPrice).toBe("49.99");
+    expect(records[0].newPrice).toBe("44.99");
+
+    // 79.99 * 0.9 = 71.991 → 71.99
+    expect(records[1].oldPrice).toBe("79.99");
+    expect(records[1].newPrice).toBe("71.99");
+  });
+
+  it("creates PriceHistory records for compareAtPrice changes", () => {
+    const actions = [
+      { field: "compareAtPrice", type: "exact", value: "99.99" },
+    ];
+
+    const records = buildPriceHistoryRecords(incomingProduct, actions, "Compare Price Rule", SHOP);
+
+    expect(records).toHaveLength(1); // Only 1 variant has different compareAtPrice (69.99 → 99.99)
+    // The second variant already has 99.99 so no change
+
+    expect(records[0].changeType).toBe("automation_compare");
+    expect(records[0].changeSource).toBe("automation");
+    expect(records[0].oldPrice).toBe("69.99");
+    expect(records[0].newPrice).toBe("99.99");
+  });
+
+  it("does NOT create records when price doesn't change", () => {
+    const actions = [
+      { field: "price", type: "exact", value: "49.99" }, // Same as current price of first variant
+    ];
+
+    const singleVariantProduct = {
+      ...incomingProduct,
+      variants: {
+        edges: [incomingProduct.variants.edges[0]], // Only first variant with price 49.99
+      },
+    };
+
+    const records = buildPriceHistoryRecords(singleVariantProduct, actions, "No Change Rule", SHOP);
+
+    expect(records).toHaveLength(0); // Price didn't change, no record
+  });
+
+  it("does NOT create records for non-price fields (tags, title, etc.)", () => {
+    const actions = [
+      { field: "tags", type: "add", value: "clearance" },
+      { field: "title", type: "prepend", value: "[SALE] " },
+      { field: "vendor", type: "set", value: "New Vendor" },
+    ];
+
+    const records = buildPriceHistoryRecords(incomingProduct, actions, "Non-Price Rule", SHOP);
+
+    expect(records).toHaveLength(0); // Only price/compareAtPrice fields create history
+  });
+
+  it("creates records for mixed price and non-price actions", () => {
+    const actions = [
+      { field: "tags", type: "add", value: "clearance" },
+      { field: "price", type: "decrease_fixed", value: "5" },
+      { field: "title", type: "append", value: " - SALE" },
+    ];
+
+    const records = buildPriceHistoryRecords(incomingProduct, actions, "Mixed Rule", SHOP);
+
+    // Only price changes should generate records
+    expect(records).toHaveLength(2); // 2 variants with price changes
+    expect(records[0].newPrice).toBe("44.99"); // 49.99 - 5
+    expect(records[1].newPrice).toBe("74.99"); // 79.99 - 5
+  });
+
+  it("handles product with null compareAtPrice", () => {
+    const productWithNullCompare = {
+      ...incomingProduct,
+      variants: {
+        edges: [
+          {
+            node: {
+              id: "gid://shopify/ProductVariant/100001",
+              title: "Default",
+              price: "49.99",
+              compareAtPrice: null,
+              sku: "TEST",
+              barcode: "",
+              inventoryQuantity: 0,
+            },
+          },
+        ],
+      },
+    };
+
+    const actions = [
+      { field: "compareAtPrice", type: "exact", value: "69.99" },
+    ];
+
+    const records = buildPriceHistoryRecords(productWithNullCompare, actions, "Set Compare", SHOP);
+
+    expect(records).toHaveLength(1);
+    expect(records[0].oldPrice).toBe("0"); // null → "0"
+    expect(records[0].newPrice).toBe("69.99");
+    expect(records[0].changeType).toBe("automation_compare");
+  });
+
+  it("includes correct bulkEditName with 'Auto:' prefix", () => {
+    const actions = [
+      { field: "price", type: "exact", value: "1.00" },
+    ];
+
+    const records = buildPriceHistoryRecords(incomingProduct, actions, "My Fancy Rule", SHOP);
+
+    expect(records.length).toBeGreaterThan(0);
+    for (const record of records) {
+      expect(record.bulkEditName).toBe("Auto: My Fancy Rule");
+    }
+  });
+
+  it("uses correct productId and productTitle from product", () => {
+    const actions = [
+      { field: "price", type: "exact", value: "1.00" },
+    ];
+
+    const records = buildPriceHistoryRecords(incomingProduct, actions, "Test", SHOP);
+
+    for (const record of records) {
+      expect(record.productId).toBe("gid://shopify/Product/15061971927404");
+      expect(record.productTitle).toBe("QA Test Product with Long Name for Testing Purposes");
+    }
+  });
+});

@@ -133,6 +133,42 @@ export function shouldResetMonthlyEdits(lastResetDate) {
   return now.getMonth() !== resetDate.getMonth() || now.getFullYear() !== resetDate.getFullYear();
 }
 
+/* ───────── Price History Record Builder (for webhook automation) ───────── */
+export function buildPriceHistoryRecords(product, actions, ruleName, shop) {
+  const records = [];
+
+  for (const mod of actions) {
+    const fieldDef = getFieldDef(mod.field);
+    if (!fieldDef || fieldDef.level !== "variant") continue;
+    if (mod.field !== "price" && mod.field !== "compareAtPrice") continue;
+
+    for (const edge of product.variants?.edges || []) {
+      const variant = edge.node;
+      const currentValue = fieldDef.accessor ? fieldDef.accessor(variant) : variant[mod.field];
+      const newValue = calcValue(currentValue, mod);
+      if (newValue === null) continue;
+
+      const oldVal = String(currentValue || "0");
+      if (oldVal !== newValue) {
+        records.push({
+          shop,
+          productId: product.id,
+          variantId: variant.id,
+          productTitle: product.title,
+          variantTitle: variant.title || null,
+          oldPrice: oldVal,
+          newPrice: newValue,
+          changeType: mod.field === "price" ? "automation" : "automation_compare",
+          changeSource: "automation",
+          bulkEditName: `Auto: ${ruleName}`,
+        });
+      }
+    }
+  }
+
+  return records;
+}
+
 /* ───────── Modification Builder (for webhook) ───────── */
 export function buildModifications(product, actions) {
   const productInput = {};

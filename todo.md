@@ -25,3 +25,4 @@
 - [x] Create integration tests for webhook handler and GraphQL mutation builders
 - [x] Create API smoke tests for Railway server health — 9 tests
 - [x] Set up GitHub Actions CI workflow (on push + daily schedule)
+- [x] BE-008-1/AUTO-07 Retest: Automation rule applies price changes but no PriceHistory record is created (schema mismatch in webhook handler)

@@ -44,13 +44,81 @@ export const action = async ({ request }) => {
       if (!matches) continue;
       console.log(`[Webhook] Product ${payload.id} matches rule "${rule.name}"`);
       try {
+        // Capture old prices BEFORE applying modifications
+        const oldPrices = {};
+        for (const edge of product.variants?.edges || []) {
+          const v = edge.node;
+          oldPrices[v.id] = {
+            price: v.price,
+            compareAtPrice: v.compareAtPrice,
+            variantTitle: v.title,
+          };
+        }
+
+        // Calculate what the new prices will be (for history tracking)
+        const priceChanges = [];
+        for (const mod of actions) {
+          const fieldDef = getFieldDef(mod.field);
+          if (!fieldDef || fieldDef.level !== "variant") continue;
+          if (mod.field !== "price" && mod.field !== "compareAtPrice") continue;
+
+          for (const edge of product.variants?.edges || []) {
+            const variant = edge.node;
+            const currentValue = fieldDef.accessor ? fieldDef.accessor(variant) : variant[mod.field];
+            const newValue = calcValue(currentValue, mod);
+            if (newValue === null) continue;
+
+            // Only record if the price actually changed
+            const oldVal = String(currentValue || "0");
+            if (oldVal !== newValue) {
+              priceChanges.push({
+                variantId: variant.id,
+                variantTitle: variant.title,
+                field: mod.field,
+                oldPrice: oldVal,
+                newPrice: newValue,
+              });
+            }
+          }
+        }
+
+        // Apply the modifications via Shopify API
         await applyModifications(admin, product, actions);
-        await prisma.automationRule.update({ where: { id: rule.id }, data: { runCount: (rule.runCount || 0) + 1 } });
-        await prisma.priceHistory.create({
-          data: { shop, editName: `Auto: ${rule.name}`, productsAffected: 1, changesApplied: actions.length, status: "completed",
-            changes: JSON.stringify({ productId: product.id, productTitle: product.title, actions, automationRuleId: rule.id }) },
+
+        // Update rule run count
+        await prisma.automationRule.update({
+          where: { id: rule.id },
+          data: { runCount: (rule.runCount || 0) + 1, lastRun: new Date() },
         });
-      } catch (err) { console.error(`[Webhook] Error applying rule "${rule.name}":`, err); }
+
+        // Create PriceHistory records for each variant price change
+        if (priceChanges.length > 0) {
+          const historyRecords = priceChanges.map((change) => ({
+            shop,
+            productId: product.id,
+            variantId: change.variantId,
+            productTitle: product.title,
+            variantTitle: change.variantTitle || null,
+            oldPrice: change.oldPrice,
+            newPrice: change.newPrice,
+            changeType: change.field === "price" ? "automation" : "automation_compare",
+            changeSource: "automation",
+            bulkEditName: `Auto: ${rule.name}`,
+          }));
+
+          console.log(`[Webhook] Creating ${historyRecords.length} PriceHistory records for rule "${rule.name}"`);
+
+          await prisma.priceHistory.createMany({
+            data: historyRecords,
+          });
+
+          console.log(`[Webhook] Successfully created ${historyRecords.length} PriceHistory records`);
+        } else {
+          console.log(`[Webhook] No price changes to record for rule "${rule.name}" (product-level or non-price changes only)`);
+        }
+      } catch (err) {
+        console.error(`[Webhook] Error applying rule "${rule.name}":`, err);
+      }
     }
   } catch (err) { console.error(`[Webhook] Error processing products/update:`, err); }
   return new Response("OK", { status: 200 });
