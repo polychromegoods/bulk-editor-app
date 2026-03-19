@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { useLoaderData, useFetcher, useNavigate } from "react-router";
+import { useLoaderData, useFetcher, useNavigate, useRouteError, isRouteErrorResponse } from "react-router";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
@@ -133,7 +133,13 @@ export const loader = async ({ request }) => {
 };
 
 export const action = async ({ request }) => {
-  const { admin, session } = await authenticate.admin(request);
+  let admin, session;
+  try {
+    ({ admin, session } = await authenticate.admin(request));
+  } catch (authErr) {
+    console.error("[BulkEdit] Authentication failed:", authErr.message);
+    return { success: false, networkError: true, message: "Authentication failed. Please reload the page and try again." };
+  }
   const formData = await request.formData();
   const intent = formData.get("intent");
 
@@ -282,34 +288,39 @@ export const action = async ({ request }) => {
       }
     }
 
-    // Create the BulkEdit record first so we can reference its ID in history
-    const bulkEditRecord = await prisma.bulkEdit.create({
-      data: {
-        shop: session.shop,
-        name: editName,
-        status: errorCount === 0 ? "completed" : "partial",
-        productCount: successCount,
-        changes: JSON.stringify(changes.slice(0, 50)),
-      },
-    });
+    // Save results to database — wrapped in try/catch so partial Shopify API
+    // successes are still recorded even if the DB write or network drops
+    try {
+      const bulkEditRecord = await prisma.bulkEdit.create({
+        data: {
+          shop: session.shop,
+          name: editName,
+          status: errorCount === 0 ? "completed" : "partial",
+          productCount: successCount,
+          changes: JSON.stringify(changes.slice(0, 50)),
+        },
+      });
 
-    // Add bulkEditId and bulkEditName to all history records
-    const enrichedHistoryRecords = historyRecords.map(record => ({
-      ...record,
-      bulkEditId: bulkEditRecord.id,
-      bulkEditName: editName,
-    }));
+      const enrichedHistoryRecords = historyRecords.map(record => ({
+        ...record,
+        bulkEditId: bulkEditRecord.id,
+        bulkEditName: editName,
+      }));
 
-    if (enrichedHistoryRecords.length > 0) {
-      await prisma.priceHistory.createMany({ data: enrichedHistoryRecords });
+      if (enrichedHistoryRecords.length > 0) {
+        await prisma.priceHistory.createMany({ data: enrichedHistoryRecords });
+      }
+
+      await prisma.shopPlan.update({
+        where: { shop: session.shop },
+        data: { monthlyEdits: { increment: 1 } },
+      });
+    } catch (dbErr) {
+      console.error("[BulkEdit] Database save error (changes may have been applied to Shopify):", dbErr.message);
+      errors.push({ product: "Database", errors: ["Some changes were applied to Shopify but could not be saved to history. Check your products to verify."] });
     }
 
-    await prisma.shopPlan.update({
-      where: { shop: session.shop },
-      data: { monthlyEdits: { increment: 1 } },
-    });
-
-    return { success: true, successCount, errorCount, errors, totalProducts: Object.keys(changesByProduct).length };
+    return { success: true, successCount, errorCount, errors, totalProducts: Object.keys(changesByProduct).length, partialWarning: errorCount > 0 };
   }
 
   if (intent === "revert") {
@@ -635,6 +646,7 @@ export default function BulkEdit() {
   const [executionResult, setExecutionResult] = useState(null);
   const [lastChanges, setLastChanges] = useState(null);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  const [networkError, setNetworkError] = useState(null);
 
   // ── Filter rule management ──
   const addFilterRule = () => {
@@ -941,7 +953,13 @@ export default function BulkEdit() {
     if (fetcher.data?.limitReached) {
       shopify.toast.show("Monthly edit limit reached! Upgrade your plan.", { isError: true });
     }
+    if (fetcher.data?.networkError) {
+      setNetworkError(fetcher.data.message || "A network error occurred. Some changes may have been applied.");
+      setStep(4);
+      setExecutionResult({ successCount: 0, errorCount: 0, errors: [], totalProducts: 0, networkError: true });
+    }
     if (fetcher.data?.success && !fetcher.data?.reverted) {
+      setNetworkError(null);
       setExecutionResult(fetcher.data);
       setStep(4);
       shopify.toast.show(fetcher.data.successCount + " changes applied" + (fetcher.data.errorCount > 0 ? ", " + fetcher.data.errorCount + " errors" : ""));
@@ -950,9 +968,20 @@ export default function BulkEdit() {
       shopify.toast.show("Reverted " + fetcher.data.successCount + " changes to original values");
       setExecutionResult(null);
       setLastChanges(null);
+      setNetworkError(null);
       setStep(1);
     }
   }, [fetcher.data]);
+
+  // Detect network errors from fetcher (connection drops during POST)
+  useEffect(() => {
+    if (fetcher.state === "idle" && !fetcher.data && lastChanges && step === 3) {
+      // fetcher finished but returned no data — likely a network error
+      setNetworkError("The connection was interrupted during execution. Some changes may have been applied to your products. Please check the History page to see what was saved.");
+      setStep(4);
+      setExecutionResult({ successCount: 0, errorCount: 0, errors: [], totalProducts: 0, networkError: true });
+    }
+  }, [fetcher.state]);
 
   const isExecuting = fetcher.state !== "idle";
 
@@ -1554,31 +1583,64 @@ export default function BulkEdit() {
         <s-section>
           <s-box padding="base">
             <div style={{ textAlign: "center", padding: "20px 0" }}>
-              <div style={{ fontSize: "48px", marginBottom: "8px" }}>{executionResult.errorCount === 0 ? "✅" : "⚠️"}</div>
-              <s-text variant="headingLg" fontWeight="bold">
-                {executionResult.errorCount === 0 ? "All Changes Applied Successfully" : "Changes Applied with Some Errors"}
-              </s-text>
+              {networkError || executionResult.networkError ? (
+                <>
+                  <div style={{ fontSize: "48px", marginBottom: "8px" }}>⚠️</div>
+                  <s-text variant="headingLg" fontWeight="bold">Connection Interrupted</s-text>
+                  <div style={{ fontSize: "14px", color: "#637381", marginTop: "8px", maxWidth: "480px", margin: "8px auto 0" }}>
+                    {networkError || "The connection was lost during execution. Some changes may have been applied."}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div style={{ fontSize: "48px", marginBottom: "8px" }}>{executionResult.errorCount === 0 ? "✅" : "⚠️"}</div>
+                  <s-text variant="headingLg" fontWeight="bold">
+                    {executionResult.errorCount === 0 ? "All Changes Applied Successfully" : "Changes Applied with Some Errors"}
+                  </s-text>
+                </>
+              )}
             </div>
           </s-box>
 
-          <s-box padding="base">
-            <div style={{ display: "flex", gap: "16px", flexWrap: "wrap", justifyContent: "center" }}>
-              <div style={styles.summaryCard("#2c6ecb")}>
-                <div style={{ fontSize: "32px", fontWeight: 700 }}>{executionResult.successCount}</div>
-                <div style={{ fontSize: "13px", color: "#637381", marginTop: "4px" }}>Changes Applied</div>
-              </div>
-              {executionResult.errorCount > 0 && (
-                <div style={styles.summaryCard("#d72c0d")}>
-                  <div style={{ fontSize: "32px", fontWeight: 700, color: "#d72c0d" }}>{executionResult.errorCount}</div>
-                  <div style={{ fontSize: "13px", color: "#637381", marginTop: "4px" }}>Errors</div>
+          {/* Network error guidance */}
+          {(networkError || executionResult.networkError) && (
+            <s-box padding="base">
+              <div style={{ padding: "16px", backgroundColor: "#fef8e8", border: "1px solid #f5d680", borderRadius: "10px" }}>
+                <div style={{ fontWeight: 700, color: "#916a00", marginBottom: "8px" }}>What happened?</div>
+                <div style={{ fontSize: "13px", color: "#4a3800", lineHeight: "1.6" }}>
+                  Your internet connection dropped while changes were being applied. The server may have processed some or all of your changes before the connection was lost.
                 </div>
-              )}
-              <div style={styles.summaryCard("#2c6ecb")}>
-                <div style={{ fontSize: "32px", fontWeight: 700 }}>{executionResult.totalProducts}</div>
-                <div style={{ fontSize: "13px", color: "#637381", marginTop: "4px" }}>Products Processed</div>
+                <div style={{ fontWeight: 700, color: "#916a00", marginTop: "12px", marginBottom: "6px" }}>What should you do?</div>
+                <div style={{ fontSize: "13px", color: "#4a3800", lineHeight: "1.6" }}>
+                  1. Go to <strong>History</strong> to see which changes were saved.<br />
+                  2. Check your <strong>Products</strong> in Shopify to verify current prices.<br />
+                  3. If some changes are missing, you can re-run the bulk edit for the remaining products.
+                </div>
               </div>
-            </div>
-          </s-box>
+            </s-box>
+          )}
+
+          {/* Normal success/error summary (only show when NOT a network error) */}
+          {!networkError && !executionResult.networkError && (
+            <s-box padding="base">
+              <div style={{ display: "flex", gap: "16px", flexWrap: "wrap", justifyContent: "center" }}>
+                <div style={styles.summaryCard("#2c6ecb")}>
+                  <div style={{ fontSize: "32px", fontWeight: 700 }}>{executionResult.successCount}</div>
+                  <div style={{ fontSize: "13px", color: "#637381", marginTop: "4px" }}>Changes Applied</div>
+                </div>
+                {executionResult.errorCount > 0 && (
+                  <div style={styles.summaryCard("#d72c0d")}>
+                    <div style={{ fontSize: "32px", fontWeight: 700, color: "#d72c0d" }}>{executionResult.errorCount}</div>
+                    <div style={{ fontSize: "13px", color: "#637381", marginTop: "4px" }}>Errors</div>
+                  </div>
+                )}
+                <div style={styles.summaryCard("#2c6ecb")}>
+                  <div style={{ fontSize: "32px", fontWeight: 700 }}>{executionResult.totalProducts}</div>
+                  <div style={{ fontSize: "13px", color: "#637381", marginTop: "4px" }}>Products Processed</div>
+                </div>
+              </div>
+            </s-box>
+          )}
 
           {executionResult.errors?.length > 0 && (
             <s-box padding="base">
@@ -1595,21 +1657,77 @@ export default function BulkEdit() {
 
           <s-box padding="base">
             <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", justifyContent: "center" }}>
-              {lastChanges && (
+              {lastChanges && !networkError && !executionResult.networkError && (
                 <button style={styles.dangerBtn(true)} onClick={handleRevert} disabled={isExecuting}>
                   {isExecuting ? "Reverting..." : "↩ Undo All Changes"}
                 </button>
               )}
               <button style={styles.primaryBtn(true)} onClick={() => {
                 setExecutionResult(null); setLastChanges(null); setSelectedIds(new Set());
-                setModifications([]); setActivePreset(null); setEditName(""); setStep(1);
+                setModifications([]); setActivePreset(null); setEditName(""); setNetworkError(null); setStep(1);
               }}>Start New Bulk Edit</button>
-              <button style={styles.secondaryBtn} onClick={() => navigate("/app/history")}>View History</button>
+              <button style={{ ...styles.secondaryBtn, fontWeight: 700 }} onClick={() => navigate("/app/history")}>View History</button>
               <button style={styles.secondaryBtn} onClick={() => navigate("/app")}>Back to Dashboard</button>
             </div>
           </s-box>
         </s-section>
       )}
+    </s-page>
+  );
+}
+
+export function ErrorBoundary() {
+  const error = useRouteError();
+  const navigate = useNavigate();
+  const isResponse = isRouteErrorResponse(error);
+
+  const title = isResponse
+    ? `${error.status} — ${error.statusText || "Something went wrong"}`
+    : "Something Went Wrong";
+
+  const message = isResponse
+    ? "The server returned an unexpected response. This may be caused by a temporary network issue."
+    : (error?.message || "An unexpected error occurred. This is often caused by a network interruption.");
+
+  return (
+    <s-page>
+      <s-section>
+        <s-box padding="base">
+          <div style={{ textAlign: "center", padding: "40px 20px" }}>
+            <div style={{ fontSize: "48px", marginBottom: "12px" }}>⚠️</div>
+            <div style={{ fontSize: "20px", fontWeight: 700, color: "#202223", marginBottom: "8px" }}>{title}</div>
+            <div style={{ fontSize: "14px", color: "#637381", maxWidth: "480px", margin: "0 auto 24px", lineHeight: "1.6" }}>
+              {message}
+            </div>
+            <div style={{ padding: "16px", backgroundColor: "#fef8e8", border: "1px solid #f5d680", borderRadius: "10px", maxWidth: "480px", margin: "0 auto 24px", textAlign: "left" }}>
+              <div style={{ fontWeight: 700, color: "#916a00", marginBottom: "6px" }}>If you were executing a bulk edit:</div>
+              <div style={{ fontSize: "13px", color: "#4a3800", lineHeight: "1.6" }}>
+                Some changes may have been applied before the error occurred. Please check the <strong>History</strong> page and your <strong>Products</strong> in Shopify to verify what was saved.
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: "8px", justifyContent: "center", flexWrap: "wrap" }}>
+              <button
+                onClick={() => window.location.reload()}
+                style={{ padding: "10px 20px", backgroundColor: "#2c6ecb", color: "white", border: "none", borderRadius: "8px", fontSize: "14px", fontWeight: 600, cursor: "pointer" }}
+              >
+                Reload Page
+              </button>
+              <button
+                onClick={() => navigate("/app/history")}
+                style={{ padding: "10px 20px", backgroundColor: "white", color: "#202223", border: "1px solid #c9cccf", borderRadius: "8px", fontSize: "14px", fontWeight: 700, cursor: "pointer" }}
+              >
+                View History
+              </button>
+              <button
+                onClick={() => navigate("/app")}
+                style={{ padding: "10px 20px", backgroundColor: "white", color: "#202223", border: "1px solid #c9cccf", borderRadius: "8px", fontSize: "14px", fontWeight: 600, cursor: "pointer" }}
+              >
+                Back to Dashboard
+              </button>
+            </div>
+          </div>
+        </s-box>
+      </s-section>
     </s-page>
   );
 }
