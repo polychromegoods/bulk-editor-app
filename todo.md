@@ -26,4 +26,6 @@
 - [x] Create API smoke tests for Railway server health — 9 tests
 - [x] Set up GitHub Actions CI workflow (on push + daily schedule)
 - [x] BE-008-1/AUTO-07 Retest: Automation rule applies price changes but no PriceHistory record is created (schema mismatch in webhook handler)
-- [ ] BE-009/EDGE-11: Network interruption during bulk edit execution crashes app with "Application Error" stack trace instead of graceful error handling. Need: error boundary, retry logic, partial success feedback
+- [x] BE-009/EDGE-11: Network interruption during bulk edit execution crashes app with "Application Error" stack trace instead of graceful error handling. Fixed: ErrorBoundary + network error detection + recovery UI
+- [x] BE-009/EDGE-11 (Retest): ErrorBoundary not catching the error - "Application Error" still shows. Fixed: Added shouldRevalidate to prevent loader revalidation after POST actions, which was the actual crash cause (revalidation GET fails when offline).
+- [x] BE-010/XBROW-04: Product names truncated on mobile viewport (~375px) on Price History page. Fixed: Replaced ellipsis truncation with word-break/overflow-wrap for full text display.

@@ -132,6 +132,20 @@ export const loader = async ({ request }) => {
   };
 };
 
+// Prevent automatic loader revalidation after fetcher actions.
+// When the network drops AFTER the action succeeds but BEFORE the revalidation GET,
+// React Router throws an unrecoverable error that App Bridge catches as "Application Error".
+// By skipping revalidation on fetcher submissions, we keep the component alive so our
+// own error handling (networkError state, ErrorBoundary) can display a user-friendly message.
+export function shouldRevalidate({ formMethod, defaultShouldRevalidate }) {
+  // Only skip revalidation for POST/PUT/DELETE (action submissions)
+  // Allow normal GET navigations to revalidate as usual
+  if (formMethod && formMethod !== "GET") {
+    return false;
+  }
+  return defaultShouldRevalidate;
+}
+
 export const action = async ({ request }) => {
   let admin, session;
   try {
