@@ -39,3 +39,6 @@
 - [x] Provide redirect URLs for Shopify Partners dashboard
 - [x] Write comprehensive billing test plan document with Shopify best practices
 - [x] Update unit tests for all 4 tiers (product limits, automation limits, upgrade/downgrade)
+
+## QA Admin Tool
+- [x] Add protected /app/qa-admin route for Olena to reset store plans and trial flags during testing
