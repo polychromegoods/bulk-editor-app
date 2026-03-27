@@ -34,7 +34,7 @@ export default function App() {
             borderRadius: "50%",
             animation: "spin 0.8s linear infinite",
           }} />
-          <div style={{ marginTop: "16px", fontSize: "14px", color: "#637381", fontWeight: 600 }}>
+          <div style={{ marginTop: "16px", fontSize: "14px", color: "#637381", fontWeight: 600, fontFamily: "-apple-system, BlinkMacSystemFont, 'San Francisco', 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif" }}>
             Loading...
           </div>
           <style>{`@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
