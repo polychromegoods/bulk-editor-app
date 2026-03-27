@@ -33,7 +33,7 @@ model Session {
 model ShopPlan {
   id              String   @id @default(cuid())
   shop            String   @unique
-  plan            String   @default("free") // free, pro, plus
+  plan            String   @default("free") // free, unlimited, pro, premium
   chargeId        String?
   trialUsed       Boolean  @default(false)
   monthlyEdits    Int      @default(0)

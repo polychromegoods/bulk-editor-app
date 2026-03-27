@@ -29,3 +29,13 @@
 - [x] BE-009/EDGE-11: Network interruption during bulk edit execution crashes app with "Application Error" stack trace instead of graceful error handling. Fixed: ErrorBoundary + network error detection + recovery UI
 - [x] BE-009/EDGE-11 (Retest): ErrorBoundary not catching the error - "Application Error" still shows. Fixed: Added shouldRevalidate to prevent loader revalidation after POST actions, which was the actual crash cause (revalidation GET fails when offline).
 - [x] BE-010/XBROW-04: Product names truncated on mobile viewport (~375px) on Price History page. Fixed: Replaced ellipsis truncation with word-break/overflow-wrap for full text display.
+
+## Pricing Model Update
+- [x] Update pricing tiers: Free (15 products/month, no automations), Unlimited Edits ($6.99/mo, unlimited edits, no automations), Pro ($14.99/mo, unlimited edits, 3 automations), Premium Pro ($24.99/mo, unlimited everything)
+- [x] Add 7-day free trial on all paid plans
+- [x] Add 20% discount for yearly subscriptions
+- [x] Update frontend pricing UI to reflect new tiers
+- [x] Update feature gating logic for automations and product limits
+- [x] Provide redirect URLs for Shopify Partners dashboard
+- [x] Write comprehensive billing test plan document with Shopify best practices
+- [x] Update unit tests for all 4 tiers (product limits, automation limits, upgrade/downgrade)

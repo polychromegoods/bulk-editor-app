@@ -3,10 +3,11 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 
-const PLAN_LIMITS = {
-  free: { editsPerMonth: 3, name: "Free" },
-  pro: { editsPerMonth: 50, name: "Pro" },
-  plus: { editsPerMonth: Infinity, name: "Plus" },
+const PLAN_INFO = {
+  free:      { productsPerEdit: 15,       automations: 0,        name: "Free" },
+  unlimited: { productsPerEdit: Infinity, automations: 0,        name: "Unlimited Edits" },
+  pro:       { productsPerEdit: Infinity, automations: 3,        name: "Pro" },
+  premium:   { productsPerEdit: Infinity, automations: Infinity, name: "Premium Pro" },
 };
 
 export const loader = async ({ request }) => {
@@ -60,7 +61,7 @@ export const loader = async ({ request }) => {
   }
 
   const plan = shopPlan.plan || "free";
-  const limits = PLAN_LIMITS[plan] || PLAN_LIMITS.free;
+  const info = PLAN_INFO[plan] || PLAN_INFO.free;
 
   return {
     shop,
@@ -72,21 +73,19 @@ export const loader = async ({ request }) => {
     recentEdits,
     todayChanges,
     currentPlan: plan,
-    planName: limits.name,
+    planName: info.name,
+    productsPerEdit: info.productsPerEdit,
+    automationLimit: info.automations,
     monthlyEdits: shopPlan.monthlyEdits,
-    editsLimit: limits.editsPerMonth,
   };
 };
 
 export default function Dashboard() {
   const {
     shop, productCount, editCount, historyCount, ruleCount, scheduledCount,
-    recentEdits, todayChanges, currentPlan, planName, monthlyEdits, editsLimit,
+    recentEdits, todayChanges, currentPlan, planName, productsPerEdit, automationLimit, monthlyEdits,
   } = useLoaderData();
   const navigate = useNavigate();
-
-  const usagePercent = editsLimit === Infinity ? 0 : Math.min(100, Math.round((monthlyEdits / editsLimit) * 100));
-  const editsRemaining = editsLimit === Infinity ? "∞" : Math.max(0, editsLimit - monthlyEdits);
 
   const statCards = [
     { label: "Products", value: productCount.toLocaleString(), icon: "📦", color: "#2c6ecb" },
@@ -99,7 +98,7 @@ export default function Dashboard() {
     { label: "Bulk Edit", description: "Select products and edit any field in bulk", icon: "⚡", path: "/app/bulk-edit", color: "#2c6ecb" },
     { label: "Browse Products", description: "View and search your product catalog", icon: "📦", path: "/app/products", color: "#008060" },
     { label: "Price History", description: "View all past price changes", icon: "📜", path: "/app/history", color: "#7c3aed" },
-    { label: "Automation Rules", description: currentPlan === "plus" ? "Manage automatic price rules" : "Requires Plus plan", icon: "🤖", path: "/app/automations", color: "#b98900", locked: currentPlan !== "plus" },
+    { label: "Automation Rules", description: (currentPlan === "pro" || currentPlan === "premium") ? "Manage automatic price rules" : "Requires Pro plan", icon: "🤖", path: "/app/automations", color: "#b98900", locked: currentPlan !== "pro" && currentPlan !== "premium" },
   ];
 
   return (
@@ -116,8 +115,8 @@ export default function Dashboard() {
           alignItems: "center",
           padding: "16px 20px",
           borderRadius: "12px",
-          backgroundColor: currentPlan === "free" ? "#f6f6f7" : currentPlan === "pro" ? "#f0f5ff" : "#faf5ff",
-          border: `1px solid ${currentPlan === "free" ? "#e1e3e5" : currentPlan === "pro" ? "#c4d6f0" : "#d8c4f0"}`,
+          backgroundColor: currentPlan === "free" ? "#f6f6f7" : currentPlan === "unlimited" ? "#f0f5ff" : currentPlan === "pro" ? "#f0f5ff" : "#faf5ff",
+          border: `1px solid ${currentPlan === "free" ? "#e1e3e5" : currentPlan === "premium" ? "#d8c4f0" : "#c4d6f0"}`,
           flexWrap: "wrap",
           gap: "16px",
         }}>
@@ -129,41 +128,38 @@ export default function Dashboard() {
                 borderRadius: "10px",
                 fontSize: "12px",
                 fontWeight: 700,
-                backgroundColor: currentPlan === "free" ? "#e4e5e7" : currentPlan === "pro" ? "#2c6ecb" : "#7c3aed",
+                backgroundColor: currentPlan === "free" ? "#e4e5e7" : currentPlan === "premium" ? "#7c3aed" : "#2c6ecb",
                 color: currentPlan === "free" ? "#637381" : "white",
               }}>
                 {planName} Plan
               </span>
               {currentPlan === "free" && (
                 <span style={{ fontSize: "13px", color: "#637381" }}>
-                  — <a href="/app/billing" style={{ color: "#2c6ecb", textDecoration: "none", fontWeight: 600 }}>Upgrade for more edits</a>
+                  — <a href="/app/billing" style={{ color: "#2c6ecb", textDecoration: "none", fontWeight: 600 }}>Upgrade for unlimited products</a>
                 </span>
               )}
             </div>
             <div style={{ fontSize: "14px", color: "#202223" }}>
-              <strong>{monthlyEdits}</strong> / {editsLimit === Infinity ? "∞" : editsLimit} bulk edits used this month
-              {editsRemaining !== "∞" && monthlyEdits < editsLimit && (
-                <span style={{ color: "#637381" }}> · {editsRemaining} remaining</span>
-              )}
-              {editsLimit !== Infinity && monthlyEdits >= editsLimit && (
-                <span style={{ color: "#d72c0d", fontWeight: 600 }}> · Limit reached — upgrade to continue</span>
-              )}
-              {editsLimit !== Infinity && monthlyEdits < editsLimit && usagePercent > 80 && (
-                <span style={{ color: "#b98900", fontWeight: 600 }}> · Running low — consider upgrading</span>
-              )}
+              Products per edit: <strong>{productsPerEdit === Infinity ? "Unlimited" : productsPerEdit}</strong>
+              {" "}· Automations: <strong>{automationLimit === Infinity ? "Unlimited" : automationLimit === 0 ? "None" : `Up to ${automationLimit}`}</strong>
+              {" "}· <strong>{monthlyEdits}</strong> edits this month
             </div>
           </div>
-          <div style={{ width: "180px" }}>
-            <div style={{ width: "100%", height: "8px", backgroundColor: "#e1e3e5", borderRadius: "4px", overflow: "hidden" }}>
-              <div style={{
-                width: `${usagePercent}%`,
-                height: "100%",
-                backgroundColor: usagePercent > 80 ? "#d72c0d" : usagePercent > 50 ? "#ffc453" : "#2c6ecb",
-                borderRadius: "4px",
-                transition: "width 0.3s ease",
-              }} />
-            </div>
-          </div>
+          <button
+            onClick={() => navigate("/app/billing")}
+            style={{
+              padding: "8px 20px",
+              borderRadius: "8px",
+              border: currentPlan === "free" ? "none" : "1px solid #c4cdd5",
+              backgroundColor: currentPlan === "free" ? "#2c6ecb" : "white",
+              color: currentPlan === "free" ? "white" : "#637381",
+              fontSize: "13px",
+              fontWeight: 600,
+              cursor: "pointer",
+            }}
+          >
+            {currentPlan === "free" ? "Upgrade" : "Manage Plan"}
+          </button>
         </div>
       </s-section>
 

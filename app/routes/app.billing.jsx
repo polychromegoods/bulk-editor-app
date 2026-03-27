@@ -2,81 +2,102 @@ import { useState, useEffect } from "react";
 import { useLoaderData, useFetcher, useNavigate } from "react-router";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
-import { authenticate } from "../shopify.server";
-
-const PLAN_NAMES = {
-  PRO: "Pro Plan",
-  PLUS: "Plus Plan",
-};
+import { authenticate, PLAN_NAMES } from "../shopify.server";
 import prisma from "../db.server";
 
 /* ───────── Plan Definitions ───────── */
 const PLAN_LIMITS = {
-  free: { editsPerMonth: 3, automations: false, scheduled: false },
-  pro: { editsPerMonth: 50, automations: false, scheduled: false },
-  plus: { editsPerMonth: Infinity, automations: true, scheduled: true },
+  free:     { productsPerEdit: 15, editsPerMonth: Infinity, automations: 0 },
+  unlimited:{ productsPerEdit: Infinity, editsPerMonth: Infinity, automations: 0 },
+  pro:      { productsPerEdit: Infinity, editsPerMonth: Infinity, automations: 3 },
+  premium:  { productsPerEdit: Infinity, editsPerMonth: Infinity, automations: Infinity },
 };
 
 const PLAN_DETAILS = [
   {
     key: "free",
     name: "Free",
-    price: "$0",
-    priceDetail: "forever",
+    monthlyPrice: 0,
+    yearlyPrice: 0,
     description: "Get started with basic bulk editing",
     features: [
-      { text: "3 bulk edits per month", included: true },
+      { text: "Up to 15 products per edit", included: true },
+      { text: "Unlimited edits per month", included: true },
       { text: "All filter & modification types", included: true },
       { text: "Price history & undo", included: true },
       { text: "Live preview", included: true },
-      { text: "Up to 50 edits per month", included: false },
+      { text: "Unlimited products per edit", included: false },
       { text: "Automation rules", included: false },
-      { text: "Scheduled price changes", included: false },
       { text: "Priority support", included: false },
     ],
     highlight: false,
-    cta: "Current Plan",
+  },
+  {
+    key: "unlimited",
+    name: "Unlimited Edits",
+    monthlyPrice: 6.99,
+    yearlyPrice: 67.10,
+    description: "Unlimited products per edit, no restrictions",
+    features: [
+      { text: "Unlimited products per edit", included: true },
+      { text: "Unlimited edits per month", included: true },
+      { text: "All filter & modification types", included: true },
+      { text: "Price history & undo", included: true },
+      { text: "Live preview", included: true },
+      { text: "CSV export of history", included: true },
+      { text: "Automation rules", included: false },
+      { text: "Priority support", included: true },
+    ],
+    highlight: false,
   },
   {
     key: "pro",
     name: "Pro",
-    price: "$9.99",
-    priceDetail: "per month",
-    description: "For growing stores that need more edits",
+    monthlyPrice: 14.99,
+    yearlyPrice: 143.90,
+    description: "Automate your pricing with rules",
     features: [
-      { text: "50 bulk edits per month", included: true },
+      { text: "Unlimited products per edit", included: true },
+      { text: "Unlimited edits per month", included: true },
       { text: "All filter & modification types", included: true },
       { text: "Price history & undo", included: true },
       { text: "Live preview", included: true },
       { text: "CSV export of history", included: true },
-      { text: "Automation rules", included: false },
-      { text: "Scheduled price changes", included: false },
+      { text: "Up to 3 automation rules", included: true },
       { text: "Priority support", included: true },
     ],
     highlight: true,
     badge: "Most Popular",
-    cta: "Start 7-Day Free Trial",
   },
   {
-    key: "plus",
-    name: "Plus",
-    price: "$19.99",
-    priceDetail: "per month",
+    key: "premium",
+    name: "Premium Pro",
+    monthlyPrice: 24.99,
+    yearlyPrice: 239.90,
     description: "Unlimited power for high-volume stores",
     features: [
-      { text: "Unlimited bulk edits", included: true },
+      { text: "Unlimited products per edit", included: true },
+      { text: "Unlimited edits per month", included: true },
       { text: "All filter & modification types", included: true },
       { text: "Price history & undo", included: true },
       { text: "Live preview", included: true },
       { text: "CSV export of history", included: true },
-      { text: "Automation rules", included: true },
-      { text: "Scheduled price changes", included: true },
+      { text: "Unlimited automation rules", included: true },
       { text: "Priority support", included: true },
     ],
     highlight: false,
-    cta: "Start 7-Day Free Trial",
   },
 ];
+
+/* Plan key → Shopify billing plan name mapping */
+const BILLING_PLAN_MAP = {
+  unlimited: { monthly: PLAN_NAMES.UNLIMITED_MONTHLY, yearly: PLAN_NAMES.UNLIMITED_YEARLY },
+  pro:       { monthly: PLAN_NAMES.PRO_MONTHLY,       yearly: PLAN_NAMES.PRO_YEARLY },
+  premium:   { monthly: PLAN_NAMES.PREMIUM_MONTHLY,   yearly: PLAN_NAMES.PREMIUM_YEARLY },
+};
+
+/* Plan tier ordering for upgrade/downgrade detection */
+const PLAN_ORDER = { free: 0, unlimited: 1, pro: 2, premium: 3 };
 
 export const loader = async ({ request }) => {
   const { session } = await authenticate.admin(request);
@@ -104,7 +125,8 @@ export const loader = async ({ request }) => {
     shop,
     currentPlan: plan,
     monthlyEdits: shopPlan.monthlyEdits,
-    editsLimit: limits.editsPerMonth,
+    productsPerEdit: limits.productsPerEdit,
+    automationLimit: limits.automations,
     trialUsed: shopPlan.trialUsed,
     isDev: process.env.NODE_ENV !== "production",
   };
@@ -119,7 +141,7 @@ export const action = async ({ request }) => {
   /* ── Test mode: directly switch plans in the database ── */
   if (intent === "test-switch") {
     const planKey = formData.get("plan");
-    if (!["free", "pro", "plus"].includes(planKey)) {
+    if (!["free", "unlimited", "pro", "premium"].includes(planKey)) {
       return { error: "Invalid plan" };
     }
     await prisma.shopPlan.upsert({
@@ -141,22 +163,27 @@ export const action = async ({ request }) => {
   }
 
   if (intent === "subscribe") {
-    const planKey = formData.get("plan"); // "pro" or "plus"
-    const planName = planKey === "plus" ? PLAN_NAMES.PLUS : PLAN_NAMES.PRO;
+    const planKey = formData.get("plan"); // "unlimited", "pro", or "premium"
+    const interval = formData.get("interval") || "monthly"; // "monthly" or "yearly"
+
+    const billingMap = BILLING_PLAN_MAP[planKey];
+    if (!billingMap) {
+      return { error: "Invalid plan" };
+    }
+    const planName = billingMap[interval];
+    if (!planName) {
+      return { error: "Invalid billing interval" };
+    }
 
     // Check if trial was already used
     const shopPlan = await prisma.shopPlan.findUnique({ where: { shop } });
     const trialDays = shopPlan?.trialUsed ? 0 : 7;
 
     try {
-      // billing.request() internally calls the Shopify GraphQL billing mutation,
-      // then throws a redirect Response that React Router catches.
-      // The returnUrl should point back to our app's billing callback.
-      // For embedded apps, use the Shopify admin URL format.
-      const appHandle = process.env.SHOPIFY_API_KEY || "bulk-editor";
+      const appHandle = process.env.SHOPIFY_API_KEY || "bulk-editor-prox";
       const returnUrl = `https://admin.shopify.com/store/${shop.replace(".myshopify.com", "")}/apps/${appHandle}/app/billing-callback?plan=${planKey}`;
 
-      console.log("[Billing] Requesting billing for shop:", shop, "plan:", planName, "returnUrl:", returnUrl, "trialDays:", trialDays);
+      console.log("[Billing] Requesting billing for shop:", shop, "plan:", planName, "interval:", interval, "returnUrl:", returnUrl, "trialDays:", trialDays);
 
       await billing.request({
         plan: planName,
@@ -177,7 +204,6 @@ export const action = async ({ request }) => {
       // billing.request() throws a Response object for the redirect.
       // We MUST re-throw it so React Router handles the redirect to Shopify's billing page.
       if (err instanceof Response) {
-        // Mark trial as used only after successful billing request
         await prisma.shopPlan.upsert({
           where: { shop },
           update: { trialUsed: true },
@@ -186,16 +212,12 @@ export const action = async ({ request }) => {
         throw err;
       }
 
-      // Log detailed error info for debugging
       console.error("[Billing] Subscribe error for shop:", shop, "plan:", planName);
-      console.error("[Billing] Error name:", err?.constructor?.name);
-      console.error("[Billing] Error message:", err?.message);
+      console.error("[Billing] Error:", err?.message);
       if (err?.errorData) {
         console.error("[Billing] Error data:", JSON.stringify(err.errorData, null, 2));
       }
-      console.error("[Billing] Full error:", JSON.stringify(err, Object.getOwnPropertyNames(err), 2));
 
-      // Provide more specific error messages
       const errorMsg = err?.errorData?.length
         ? err.errorData.map(e => e.message || JSON.stringify(e)).join("; ")
         : err?.message || "Unknown error";
@@ -205,7 +227,6 @@ export const action = async ({ request }) => {
 
   if (intent === "cancel") {
     try {
-      // Reset to free plan and reset edit counter to avoid showing e.g. 8/3
       await prisma.shopPlan.upsert({
         where: { shop },
         update: { plan: "free", chargeId: null, monthlyEdits: 0, monthlyEditReset: new Date() },
@@ -222,12 +243,13 @@ export const action = async ({ request }) => {
 };
 
 export default function Billing() {
-  const { shop, currentPlan, monthlyEdits, editsLimit, trialUsed, isDev } = useLoaderData();
+  const { shop, currentPlan, monthlyEdits, productsPerEdit, automationLimit, trialUsed, isDev } = useLoaderData();
   const fetcher = useFetcher();
   const navigate = useNavigate();
   const shopify = useAppBridge();
   const [showCancelDialog, setShowCancelDialog] = useState(false);
   const [showTestMode, setShowTestMode] = useState(false);
+  const [billingInterval, setBillingInterval] = useState("monthly");
 
   const isSubmitting = fetcher.state !== "idle";
 
@@ -257,7 +279,10 @@ export default function Billing() {
   }, [fetcher.data]);
 
   const handleSubscribe = (planKey) => {
-    fetcher.submit({ intent: "subscribe", plan: planKey }, { method: "POST" });
+    fetcher.submit(
+      { intent: "subscribe", plan: planKey, interval: billingInterval },
+      { method: "POST" }
+    );
   };
 
   const handleCancel = () => {
@@ -273,7 +298,16 @@ export default function Billing() {
     fetcher.submit({ intent: "test-reset" }, { method: "POST" });
   };
 
-  const usagePercent = editsLimit === Infinity ? 0 : Math.min(100, Math.round((monthlyEdits / editsLimit) * 100));
+  const formatPrice = (plan) => {
+    if (plan.monthlyPrice === 0) return { display: "$0", detail: "forever" };
+    if (billingInterval === "yearly") {
+      const yearlyMonthly = (plan.yearlyPrice / 12).toFixed(2);
+      return { display: `$${yearlyMonthly}`, detail: "per month, billed yearly" };
+    }
+    return { display: `$${plan.monthlyPrice.toFixed(2)}`, detail: "per month" };
+  };
+
+  const currentPlanName = PLAN_DETAILS.find(p => p.key === currentPlan)?.name || "Free";
 
   return (
     <s-page title="Plans & Billing" subtitle="Choose the plan that's right for your store">
@@ -282,34 +316,18 @@ export default function Billing() {
         <s-box padding="base">
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "16px" }}>
             <div>
-              <div style={{ fontSize: "13px", color: "#637381", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "4px" }}>Current Plan</div>
-              <div style={{ fontSize: "28px", fontWeight: 800, color: "#202223" }}>
-                {currentPlan === "free" ? "Free" : currentPlan === "pro" ? "Pro" : "Plus"}
+              <div style={{ fontSize: "13px", color: "#637381", marginBottom: "4px" }}>Current Plan</div>
+              <div style={{ fontSize: "24px", fontWeight: 800, color: "#202223" }}>
+                {currentPlanName}
               </div>
             </div>
             <div style={{ textAlign: "right" }}>
-              <div style={{ fontSize: "13px", color: "#637381", marginBottom: "6px" }}>
-                Monthly Usage: <strong>{monthlyEdits}</strong> / {editsLimit === Infinity ? "∞" : editsLimit} edits
+              <div style={{ fontSize: "13px", color: "#637381", marginBottom: "4px" }}>
+                Products per edit: <strong>{productsPerEdit === Infinity ? "Unlimited" : productsPerEdit}</strong>
               </div>
-              <div style={{ width: "200px", height: "8px", backgroundColor: "#e1e3e5", borderRadius: "4px", overflow: "hidden" }}>
-                <div style={{
-                  width: `${usagePercent}%`,
-                  height: "100%",
-                  backgroundColor: usagePercent > 80 ? "#d72c0d" : usagePercent > 50 ? "#ffc453" : "#2c6ecb",
-                  borderRadius: "4px",
-                  transition: "width 0.3s ease",
-                }} />
+              <div style={{ fontSize: "13px", color: "#637381" }}>
+                Automation rules: <strong>{automationLimit === Infinity ? "Unlimited" : automationLimit === 0 ? "None" : `Up to ${automationLimit}`}</strong>
               </div>
-              {currentPlan !== "plus" && monthlyEdits >= editsLimit && editsLimit !== Infinity && (
-                <div style={{ fontSize: "12px", color: "#d72c0d", marginTop: "4px", fontWeight: 600 }}>
-                  Limit reached — upgrade to continue
-                </div>
-              )}
-              {currentPlan !== "plus" && monthlyEdits < editsLimit && usagePercent > 80 && (
-                <div style={{ fontSize: "12px", color: "#b98900", marginTop: "4px", fontWeight: 600 }}>
-                  Running low — consider upgrading
-                </div>
-              )}
             </div>
           </div>
         </s-box>
@@ -327,7 +345,7 @@ export default function Billing() {
             }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: showTestMode ? "12px" : "0" }}>
                 <div>
-                  <span style={{ fontSize: "14px", fontWeight: 700, color: "#b98900" }}>🧪 Test Mode</span>
+                  <span style={{ fontSize: "14px", fontWeight: 700, color: "#b98900" }}>Test Mode</span>
                   <span style={{ fontSize: "12px", color: "#637381", marginLeft: "8px" }}>Switch plans instantly for development testing</span>
                 </div>
                 <button
@@ -349,7 +367,7 @@ export default function Billing() {
               {showTestMode && (
                 <div>
                   <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginBottom: "12px" }}>
-                    {["free", "pro", "plus"].map((p) => (
+                    {["free", "unlimited", "pro", "premium"].map((p) => (
                       <button
                         key={p}
                         onClick={() => handleTestSwitch(p)}
@@ -366,7 +384,7 @@ export default function Billing() {
                           opacity: isSubmitting ? 0.6 : 1,
                         }}
                       >
-                        {currentPlan === p ? `✓ ${p.charAt(0).toUpperCase() + p.slice(1)}` : `Switch to ${p.charAt(0).toUpperCase() + p.slice(1)}`}
+                        {currentPlan === p ? `Current` : `${p.charAt(0).toUpperCase() + p.slice(1)}`}
                       </button>
                     ))}
                   </div>
@@ -390,7 +408,7 @@ export default function Billing() {
                     </span>
                   </div>
                   <div style={{ fontSize: "11px", color: "#b98900", marginTop: "8px" }}>
-                    ⚠️ Test mode only appears in development. It will not show in production.
+                    Test mode only appears in development. It will not show in production.
                   </div>
                 </div>
               )}
@@ -399,14 +417,76 @@ export default function Billing() {
         </s-section>
       )}
 
+      {/* Billing Interval Toggle */}
+      <s-section>
+        <s-box padding="base">
+          <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: "12px" }}>
+            <span style={{
+              fontSize: "14px",
+              fontWeight: billingInterval === "monthly" ? 700 : 400,
+              color: billingInterval === "monthly" ? "#202223" : "#637381",
+            }}>
+              Monthly
+            </span>
+            <button
+              onClick={() => setBillingInterval(billingInterval === "monthly" ? "yearly" : "monthly")}
+              style={{
+                width: "52px",
+                height: "28px",
+                borderRadius: "14px",
+                border: "none",
+                backgroundColor: billingInterval === "yearly" ? "#2c6ecb" : "#c4cdd5",
+                cursor: "pointer",
+                position: "relative",
+                transition: "background-color 0.2s ease",
+              }}
+            >
+              <div style={{
+                width: "22px",
+                height: "22px",
+                borderRadius: "11px",
+                backgroundColor: "white",
+                position: "absolute",
+                top: "3px",
+                left: billingInterval === "yearly" ? "27px" : "3px",
+                transition: "left 0.2s ease",
+                boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
+              }} />
+            </button>
+            <span style={{
+              fontSize: "14px",
+              fontWeight: billingInterval === "yearly" ? 700 : 400,
+              color: billingInterval === "yearly" ? "#202223" : "#637381",
+            }}>
+              Yearly
+            </span>
+            {billingInterval === "yearly" && (
+              <span style={{
+                backgroundColor: "#e3f1df",
+                color: "#1a7f37",
+                padding: "4px 10px",
+                borderRadius: "12px",
+                fontSize: "12px",
+                fontWeight: 700,
+              }}>
+                Save 20%
+              </span>
+            )}
+          </div>
+        </s-box>
+      </s-section>
+
       {/* Plan Cards */}
       <s-section>
         <s-box padding="base">
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: "16px" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "16px" }}>
             {PLAN_DETAILS.map((plan) => {
               const isCurrent = plan.key === currentPlan;
-              const isDowngrade = (currentPlan === "plus" && plan.key !== "plus") || (currentPlan === "pro" && plan.key === "free");
-              const isUpgrade = (currentPlan === "free" && plan.key !== "free") || (currentPlan === "pro" && plan.key === "plus");
+              const currentOrder = PLAN_ORDER[currentPlan] || 0;
+              const planOrder = PLAN_ORDER[plan.key] || 0;
+              const isDowngrade = planOrder < currentOrder;
+              const isUpgrade = planOrder > currentOrder;
+              const price = formatPrice(plan);
 
               return (
                 <div key={plan.key} style={{
@@ -431,6 +511,7 @@ export default function Billing() {
                       borderRadius: "12px",
                       fontSize: "12px",
                       fontWeight: 700,
+                      whiteSpace: "nowrap",
                     }}>
                       {plan.badge}
                     </div>
@@ -438,18 +519,23 @@ export default function Billing() {
 
                   <div style={{ textAlign: "center", marginBottom: "16px" }}>
                     <div style={{ fontSize: "18px", fontWeight: 700, color: "#202223", marginBottom: "4px" }}>{plan.name}</div>
-                    <div style={{ fontSize: "36px", fontWeight: 800, color: "#202223" }}>
-                      {plan.price}
-                      <span style={{ fontSize: "14px", fontWeight: 400, color: "#637381" }}>/{plan.priceDetail}</span>
+                    <div style={{ fontSize: "32px", fontWeight: 800, color: "#202223" }}>
+                      {price.display}
+                      <span style={{ fontSize: "13px", fontWeight: 400, color: "#637381" }}>/{price.detail}</span>
                     </div>
+                    {billingInterval === "yearly" && plan.monthlyPrice > 0 && (
+                      <div style={{ fontSize: "12px", color: "#637381", marginTop: "2px", textDecoration: "line-through" }}>
+                        ${plan.monthlyPrice.toFixed(2)}/month
+                      </div>
+                    )}
                     <div style={{ fontSize: "13px", color: "#637381", marginTop: "4px" }}>{plan.description}</div>
                   </div>
 
                   <div style={{ flex: 1, marginBottom: "16px" }}>
                     {plan.features.map((feature, i) => (
-                      <div key={i} style={{ display: "flex", alignItems: "center", gap: "8px", padding: "6px 0", fontSize: "13px" }}>
+                      <div key={i} style={{ display: "flex", alignItems: "center", gap: "8px", padding: "5px 0", fontSize: "13px" }}>
                         <span style={{ fontSize: "14px", flexShrink: 0 }}>
-                          {feature.included ? "✅" : "—"}
+                          {feature.included ? "\u2705" : "\u2014"}
                         </span>
                         <span style={{ color: feature.included ? "#202223" : "#babec3" }}>{feature.text}</span>
                       </div>
@@ -466,7 +552,7 @@ export default function Billing() {
                         fontWeight: 700,
                         fontSize: "14px",
                       }}>
-                        ✓ Current Plan
+                        Current Plan
                       </div>
                     ) : isUpgrade ? (
                       <button
@@ -486,7 +572,7 @@ export default function Billing() {
                           transition: "all 0.15s",
                         }}
                       >
-                        {isSubmitting ? "Redirecting..." : trialUsed ? `Upgrade to ${plan.name}` : plan.cta}
+                        {isSubmitting ? "Redirecting..." : trialUsed ? `Upgrade to ${plan.name}` : "Start 7-Day Free Trial"}
                       </button>
                     ) : isDowngrade ? (
                       <button
@@ -521,13 +607,14 @@ export default function Billing() {
           <div style={{ fontWeight: 700, fontSize: "18px", color: "#202223", marginBottom: "16px" }}>Frequently Asked Questions</div>
 
           {[
-            { q: "What counts as a bulk edit?", a: "Each time you execute a bulk change (Step 3 → Apply), that counts as one bulk edit, regardless of how many products or variants are included." },
-            { q: "What happens when I hit my limit?", a: "You'll see a notification and won't be able to execute new bulk edits until next month or until you upgrade. Your existing data and history are unaffected." },
+            { q: "What's the difference between the Free and Unlimited Edits plan?", a: "The Free plan limits you to 15 products per bulk edit. The Unlimited Edits plan removes that limit, so you can edit your entire catalog at once." },
+            { q: "What are automation rules?", a: "Automation rules automatically adjust prices when product conditions are met (e.g., reduce price by 10% when inventory drops below 5). Available on Pro (up to 3 rules) and Premium Pro (unlimited rules)." },
+            { q: "Is there a free trial?", a: "Yes! All paid plans include a 7-day free trial. You won't be charged until the trial ends." },
+            { q: "How much do I save with yearly billing?", a: "You save 20% with yearly billing compared to monthly. The discount is applied automatically when you select the yearly toggle." },
             { q: "Can I cancel anytime?", a: "Yes. You can downgrade to Free at any time. Shopify handles all billing — you'll keep your paid features until the end of your current billing cycle." },
-            { q: "Is there a free trial?", a: "Yes! Pro and Plus plans include a 7-day free trial. You won't be charged until the trial ends." },
-            { q: "Do automations and scheduled edits count toward my limit?", a: "Automations and scheduled edits are only available on the Plus plan, which has unlimited edits." },
+            { q: "Can I switch between monthly and yearly?", a: "Yes. When you switch plans, the new billing interval takes effect immediately. Shopify will prorate any remaining balance." },
           ].map((item, i) => (
-            <div key={i} style={{ padding: "12px 0", borderBottom: i < 4 ? "1px solid #f1f2f3" : "none" }}>
+            <div key={i} style={{ padding: "12px 0", borderBottom: i < 5 ? "1px solid #f1f2f3" : "none" }}>
               <div style={{ fontWeight: 600, fontSize: "14px", color: "#202223", marginBottom: "4px" }}>{item.q}</div>
               <div style={{ fontSize: "13px", color: "#637381" }}>{item.a}</div>
             </div>
@@ -541,7 +628,7 @@ export default function Billing() {
           <div style={{ backgroundColor: "white", borderRadius: "16px", padding: "24px", maxWidth: "420px", width: "90%", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
             <div style={{ fontSize: "18px", fontWeight: 700, color: "#202223", marginBottom: "8px" }}>Downgrade to Free?</div>
             <div style={{ fontSize: "14px", color: "#637381", marginBottom: "20px" }}>
-              You'll lose access to your current plan's features at the end of your billing cycle. Your history and settings will be preserved.
+              You'll lose access to unlimited products per edit and automation rules. Your history and settings will be preserved.
             </div>
             <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
               <button onClick={() => setShowCancelDialog(false)} style={{ padding: "10px 20px", borderRadius: "8px", border: "1px solid #c4cdd5", backgroundColor: "white", cursor: "pointer", fontSize: "14px" }}>

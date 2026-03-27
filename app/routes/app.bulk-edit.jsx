@@ -119,16 +119,16 @@ export const loader = async ({ request }) => {
     });
   }
 
-  const PLAN_LIMITS = { free: 3, pro: 50, plus: Infinity };
+  // New tier limits: free = 15 products per edit, paid = unlimited
+  const PRODUCTS_PER_EDIT = { free: 15, unlimited: Infinity, pro: Infinity, premium: Infinity };
   const plan = shopPlan.plan || "free";
-  const editsLimit = PLAN_LIMITS[plan] || 3;
+  const productsPerEdit = PRODUCTS_PER_EDIT[plan] || 15;
   const monthlyEdits = shopPlan.monthlyEdits || 0;
-  const editsRemaining = editsLimit === Infinity ? Infinity : Math.max(0, editsLimit - monthlyEdits);
 
   return {
     products, vendors, productTypes, allTags, collections,
     shop: session.shop, recentEdits,
-    currentPlan: plan, monthlyEdits, editsLimit, editsRemaining,
+    currentPlan: plan, monthlyEdits, productsPerEdit,
   };
 };
 
@@ -162,11 +162,16 @@ export const action = async ({ request }) => {
     if (!shopPlan) {
       shopPlan = await prisma.shopPlan.create({ data: { shop: session.shop } });
     }
-    const PLAN_LIMITS = { free: 3, pro: 50, plus: Infinity };
+    // New tier limits: free = 15 products per edit, paid = unlimited
+    const PRODUCTS_PER_EDIT = { free: 15, unlimited: Infinity, pro: Infinity, premium: Infinity };
     const plan = shopPlan.plan || "free";
-    const editsLimit = PLAN_LIMITS[plan] || 3;
-    if (editsLimit !== Infinity && shopPlan.monthlyEdits >= editsLimit) {
-      return { success: false, limitReached: true, currentPlan: plan, monthlyEdits: shopPlan.monthlyEdits, editsLimit };
+    const productsPerEdit = PRODUCTS_PER_EDIT[plan] || 15;
+
+    // Check product count limit for free tier
+    const changesPreCheck = JSON.parse(formData.get("changes") || "[]");
+    const uniqueProducts = new Set(changesPreCheck.map(c => c.productId));
+    if (productsPerEdit !== Infinity && uniqueProducts.size > productsPerEdit) {
+      return { success: false, limitReached: true, currentPlan: plan, productsPerEdit, productsAttempted: uniqueProducts.size };
     }
 
     const changesRaw = formData.get("changes");
@@ -640,7 +645,7 @@ const styles = {
    ═══════════════════════════════════════════════════════════════ */
 
 export default function BulkEdit() {
-  const { products, vendors, productTypes, allTags, collections, shop, recentEdits, currentPlan, monthlyEdits, editsLimit, editsRemaining } = useLoaderData();
+  const { products, vendors, productTypes, allTags, collections, shop, recentEdits, currentPlan, monthlyEdits, productsPerEdit } = useLoaderData();
   const fetcher = useFetcher();
   const navigate = useNavigate();
   const shopify = useAppBridge();
@@ -965,7 +970,7 @@ export default function BulkEdit() {
 
   useEffect(() => {
     if (fetcher.data?.limitReached) {
-      shopify.toast.show("Monthly edit limit reached! Upgrade your plan.", { isError: true });
+      shopify.toast.show(`Free plan allows up to ${fetcher.data.productsPerEdit || 15} products per edit. Upgrade for unlimited!`, { isError: true });
     }
     if (fetcher.data?.networkError) {
       setNetworkError(fetcher.data.message || "A network error occurred. Some changes may have been applied.");
@@ -1063,7 +1068,7 @@ export default function BulkEdit() {
         <s-box padding="base">
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", backgroundColor: "#f0f5ff", borderRadius: "10px", border: "1px solid #c4d7f2" }}>
             <span style={{ fontSize: "14px", color: "#1a3a6b" }}>
-              <strong>{editsRemaining}</strong> bulk edit{editsRemaining !== 1 ? "s" : ""} remaining this month ({currentPlan.charAt(0).toUpperCase() + currentPlan.slice(1)} plan)
+              Free plan: up to <strong>{productsPerEdit}</strong> products per edit. Upgrade for unlimited.
             </span>
             <button style={{ ...styles.primaryBtn(true), padding: "6px 16px", fontSize: "13px" }} onClick={() => navigate("/app/billing")}>View Plans</button>
           </div>
@@ -1569,7 +1574,7 @@ export default function BulkEdit() {
                 onClick={handleExecute}
                 disabled={changes.length === 0 || isExecuting}
               >
-                {isExecuting ? "Executing..." : editsRemaining <= 0 && currentPlan === "free" ? "Limit Reached — Upgrade" : `Apply ${changes.length} Change${changes.length !== 1 ? "s" : ""}`}
+                {isExecuting ? "Executing..." : `Apply ${changes.length} Change${changes.length !== 1 ? "s" : ""}`}
               </button>
             </div>
           </s-box>

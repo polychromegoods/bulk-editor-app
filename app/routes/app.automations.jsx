@@ -72,14 +72,23 @@ export const action = async ({ request }) => {
   const shop = session.shop;
 
   const shopPlan = await prisma.shopPlan.findUnique({ where: { shop } });
-  if (!shopPlan || shopPlan.plan !== "plus") {
-    return { error: "Automation rules require the Plus plan." };
+  const plan = shopPlan?.plan || "free";
+  if (plan !== "pro" && plan !== "premium") {
+    return { error: "Automation rules require the Pro or Premium Pro plan." };
   }
 
   const formData = await request.formData();
   const intent = formData.get("intent");
 
   if (intent === "create_rule") {
+    // Enforce automation limit for Pro plan (max 3 rules)
+    if (plan === "pro") {
+      const existingRules = await prisma.automationRule.count({ where: { shop } });
+      if (existingRules >= 3) {
+        return { error: "Pro plan allows up to 3 automation rules. Upgrade to Premium Pro for unlimited rules." };
+      }
+    }
+
     const name = formData.get("name");
     const filterRules = formData.get("filterRules") || "[]";
     const modifications = formData.get("modifications") || "[]";
@@ -334,7 +343,7 @@ export default function Automations() {
   }, [actionData]);
 
   // Plan gating
-  if (currentPlan !== "plus") {
+  if (currentPlan !== "pro" && currentPlan !== "premium") {
     return (
       <s-page title="Automation Rules">
         <s-section>
@@ -347,8 +356,8 @@ export default function Automations() {
                 Set conditions and actions once — they run automatically via webhooks.
               </div>
               <div style={{ padding: "16px", backgroundColor: "#fef8e8", borderRadius: "12px", marginBottom: "24px", maxWidth: "400px", margin: "0 auto 24px" }}>
-                <div style={{ fontSize: "14px", fontWeight: 600, color: "#916a00" }}>Plus Plan Required</div>
-                <div style={{ fontSize: "13px", color: "#916a00", marginTop: "4px" }}>Upgrade to Plus ($19.99/mo) to unlock automation rules.</div>
+                <div style={{ fontSize: "14px", fontWeight: 600, color: "#916a00" }}>Pro Plan Required</div>
+                <div style={{ fontSize: "13px", color: "#916a00", marginTop: "4px" }}>Upgrade to Pro ($14.99/mo) for up to 3 automation rules, or Premium Pro ($24.99/mo) for unlimited.</div>
               </div>
               <button style={styles.primaryBtn(true)} onClick={() => navigate("/app/billing")}>
                 View Plans
