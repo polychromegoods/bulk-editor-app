@@ -42,3 +42,4 @@
 
 ## QA Admin Tool
 - [x] Add protected /app/qa-admin route for Olena to reset store plans and trial flags during testing
+- [x] Restrict /app/qa-admin route to development stores only (404 for live stores)

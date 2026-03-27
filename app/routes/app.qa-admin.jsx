@@ -10,9 +10,26 @@ export const ErrorBoundary = boundary.error;
    Protected route for QA testers to reset billing state.
    ═══════════════════════════════════════════════════════════ */
 
+// Helper: check if the current store is a development store
+async function isDevStore(admin) {
+  try {
+    const response = await admin.graphql(`{ shop { plan { partnerDevelopment } } }`);
+    const { data } = await response.json();
+    return data?.shop?.plan?.partnerDevelopment === true;
+  } catch {
+    return false;
+  }
+}
+
 export const loader = async ({ request }) => {
-  const { session } = await authenticate.admin(request);
+  const { session, admin } = await authenticate.admin(request);
   const shop = session.shop;
+
+  // Only allow access on development stores
+  const isDev = await isDevStore(admin);
+  if (!isDev) {
+    throw new Response("Not Found", { status: 404 });
+  }
 
   // Get current shop plan
   const shopPlan = await prisma.shopPlan.findUnique({ where: { shop } });
@@ -27,8 +44,14 @@ export const loader = async ({ request }) => {
 };
 
 export const action = async ({ request }) => {
-  const { session } = await authenticate.admin(request);
+  const { session, admin } = await authenticate.admin(request);
   const shop = session.shop;
+
+  // Only allow actions on development stores
+  const isDev = await isDevStore(admin);
+  if (!isDev) {
+    throw new Response("Not Found", { status: 404 });
+  }
   const formData = await request.formData();
   const intent = formData.get("intent");
   const targetShop = formData.get("targetShop") || shop;
