@@ -2,21 +2,22 @@ import "@shopify/shopify-app-react-router/adapters/node";
 import {
   ApiVersion,
   AppDistribution,
-  BillingInterval,
-  BillingReplacementBehavior,
   shopifyApp,
 } from "@shopify/shopify-app-react-router/server";
 import { PrismaSessionStorage } from "@shopify/shopify-app-session-storage-prisma";
 import prisma from "./db.server";
 
-export const PLAN_NAMES = {
-  UNLIMITED_MONTHLY: "Unlimited Edits Monthly",
-  UNLIMITED_YEARLY: "Unlimited Edits Yearly",
-  PRO_MONTHLY: "Pro Monthly",
-  PRO_YEARLY: "Pro Yearly",
-  PREMIUM_MONTHLY: "Premium Pro Monthly",
-  PREMIUM_YEARLY: "Premium Pro Yearly",
-};
+/**
+ * Managed Pricing is enabled for this app on the Shopify Partners dashboard.
+ * Shopify hosts the plan selection page and handles all billing.
+ * We do NOT define a `billing` block here — doing so would cause:
+ *   "Managed Pricing Apps cannot use the Billing API (to create charges)"
+ *
+ * Instead, we:
+ *   1. Query `currentAppInstallation` via GraphQL to read the active subscription
+ *   2. Link merchants to Shopify's hosted plan selection page for upgrades
+ *   3. Listen to APP_SUBSCRIPTIONS_UPDATE webhook to sync plan changes
+ */
 
 const shopify = shopifyApp({
   apiKey: process.env.SHOPIFY_API_KEY,
@@ -27,77 +28,7 @@ const shopify = shopifyApp({
   authPathPrefix: "/auth",
   sessionStorage: new PrismaSessionStorage(prisma),
   distribution: AppDistribution.AppStore,
-  billing: {
-    /* ── Unlimited Edits: $6.99/mo or $67.10/yr (20% off) ── */
-    [PLAN_NAMES.UNLIMITED_MONTHLY]: {
-      replacementBehavior: BillingReplacementBehavior.ApplyImmediately,
-      trialDays: 7,
-      lineItems: [
-        {
-          interval: BillingInterval.Every30Days,
-          amount: 6.99,
-          currencyCode: "USD",
-        },
-      ],
-    },
-    [PLAN_NAMES.UNLIMITED_YEARLY]: {
-      replacementBehavior: BillingReplacementBehavior.ApplyImmediately,
-      trialDays: 7,
-      lineItems: [
-        {
-          interval: BillingInterval.Annual,
-          amount: 67.10,
-          currencyCode: "USD",
-        },
-      ],
-    },
-    /* ── Pro: $14.99/mo or $143.90/yr (20% off) ── */
-    [PLAN_NAMES.PRO_MONTHLY]: {
-      replacementBehavior: BillingReplacementBehavior.ApplyImmediately,
-      trialDays: 7,
-      lineItems: [
-        {
-          interval: BillingInterval.Every30Days,
-          amount: 14.99,
-          currencyCode: "USD",
-        },
-      ],
-    },
-    [PLAN_NAMES.PRO_YEARLY]: {
-      replacementBehavior: BillingReplacementBehavior.ApplyImmediately,
-      trialDays: 7,
-      lineItems: [
-        {
-          interval: BillingInterval.Annual,
-          amount: 143.90,
-          currencyCode: "USD",
-        },
-      ],
-    },
-    /* ── Premium Pro: $24.99/mo or $239.90/yr (20% off) ── */
-    [PLAN_NAMES.PREMIUM_MONTHLY]: {
-      replacementBehavior: BillingReplacementBehavior.ApplyImmediately,
-      trialDays: 7,
-      lineItems: [
-        {
-          interval: BillingInterval.Every30Days,
-          amount: 24.99,
-          currencyCode: "USD",
-        },
-      ],
-    },
-    [PLAN_NAMES.PREMIUM_YEARLY]: {
-      replacementBehavior: BillingReplacementBehavior.ApplyImmediately,
-      trialDays: 7,
-      lineItems: [
-        {
-          interval: BillingInterval.Annual,
-          amount: 239.90,
-          currencyCode: "USD",
-        },
-      ],
-    },
-  },
+  // NO billing block — Managed Pricing handles all charges
   future: {
     expiringOfflineAccessTokens: true,
   },

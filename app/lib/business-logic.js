@@ -5,14 +5,19 @@
 
 /* ───────── Plan Definitions ───────── */
 export const PLAN_LIMITS = {
-  free: { editsPerMonth: 3, automations: false, scheduled: false },
-  pro: { editsPerMonth: 50, automations: false, scheduled: false },
-  plus: { editsPerMonth: Infinity, automations: true, scheduled: true },
+  free:      { productsPerEdit: 15,       editsPerMonth: Infinity, automations: 0,        scheduled: false },
+  unlimited: { productsPerEdit: Infinity, editsPerMonth: Infinity, automations: 0,        scheduled: true },
+  pro:       { productsPerEdit: Infinity, editsPerMonth: Infinity, automations: 3,        scheduled: true },
+  premium:   { productsPerEdit: Infinity, editsPerMonth: Infinity, automations: Infinity, scheduled: true },
 };
 
 export const PLAN_NAMES = {
-  PRO: "Pro Plan",
-  PLUS: "Plus Plan",
+  UNLIMITED_MONTHLY: "Unlimited Edits Monthly",
+  UNLIMITED_YEARLY: "Unlimited Edits Yearly",
+  PRO_MONTHLY: "Pro Monthly",
+  PRO_YEARLY: "Pro Yearly",
+  PREMIUM_MONTHLY: "Premium Pro Monthly",
+  PREMIUM_YEARLY: "Premium Pro Yearly",
 };
 
 /* ───────── Editable Fields ───────── */

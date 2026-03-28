@@ -242,7 +242,7 @@ export default function Dashboard() {
                   backgroundColor: "#fef3f2",
                   color: "#d72c0d",
                 }}>
-                  🔒 Plus Plan
+                  🔒 Upgrade Required
                 </div>
               )}
             </div>

@@ -6,9 +6,10 @@ import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
 
 const PLAN_LIMITS = {
-  free: { editsPerMonth: 3, name: "Free" },
-  pro: { editsPerMonth: 50, name: "Pro" },
-  plus: { editsPerMonth: Infinity, name: "Plus" },
+  free:      { editsPerMonth: Infinity, name: "Free" },
+  unlimited: { editsPerMonth: Infinity, name: "Unlimited Edits" },
+  pro:       { editsPerMonth: Infinity, name: "Pro" },
+  premium:   { editsPerMonth: Infinity, name: "Premium Pro" },
 };
 
 export const loader = async ({ request }) => {

@@ -43,3 +43,6 @@
 ## QA Admin Tool
 - [x] Add protected /app/qa-admin route for Olena to reset store plans and trial flags during testing
 - [x] Restrict /app/qa-admin route to development stores only (404 for live stores)
+
+## Bug Fixes
+- [ ] BE-011/BILL-02: Upgrade to paid plans fails — "Managed Pricing Apps cannot use the Billing API" error. Need to switch from Managed Pricing to Billing API in Shopify Partners.

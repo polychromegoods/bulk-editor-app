@@ -23,5 +23,9 @@ api_version = "2026-04"
   topics = ["products/update"]
   uri = "/webhooks/products/update"
 
+  [[webhooks.subscriptions]]
+  topics = ["app_subscriptions/update"]
+  uri = "/webhooks/app_subscriptions/update"
+
 [build]
 automatically_update_urls_on_dev = true

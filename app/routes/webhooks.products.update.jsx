@@ -7,8 +7,8 @@ export const action = async ({ request }) => {
   console.log(`[Webhook] products/update received for shop: ${shop}, product: ${payload.id}`);
   try {
     const shopPlan = await prisma.shopPlan.findUnique({ where: { shop } });
-    if (!shopPlan || shopPlan.plan !== "plus") {
-      console.log(`[Webhook] Shop ${shop} is not on Plus plan, skipping automations`);
+    if (!shopPlan || (shopPlan.plan !== "pro" && shopPlan.plan !== "premium")) {
+      console.log(`[Webhook] Shop ${shop} is not on Pro or Premium plan, skipping automations`);
       return new Response("OK", { status: 200 });
     }
     const rules = await prisma.automationRule.findMany({ where: { shop, enabled: true } });
