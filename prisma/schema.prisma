@@ -31,15 +31,30 @@ model Session {
 }
 
 model ShopPlan {
-  id              String   @id @default(cuid())
-  shop            String   @unique
-  plan            String   @default("free") // free, unlimited, pro, premium
+  id              String    @id @default(cuid())
+  shop            String    @unique
+  plan            String    @default("free") // free, unlimited, pro, premium
   chargeId        String?
-  trialUsed       Boolean  @default(false)
-  monthlyEdits    Int      @default(0)
+  trialUsed       Boolean   @default(false)
+  monthlyEdits    Int       @default(0)
   monthlyEditReset DateTime @default(now())
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  promoCode       String?   // active promo code if any
+  promoPlan       String?   // plan level granted by promo (e.g. "premium")
+  promoExpiresAt  DateTime? // when the promo access expires
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
+
+model PromoCode {
+  id            String    @id @default(cuid())
+  code          String    @unique
+  plan          String    @default("premium") // plan level granted
+  durationDays  Int       @default(365)        // how long the promo lasts
+  maxUses       Int       @default(100)         // max total redemptions
+  usedCount     Int       @default(0)           // current redemption count
+  active        Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 }
 
 model BulkEdit {

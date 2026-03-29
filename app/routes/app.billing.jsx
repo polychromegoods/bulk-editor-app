@@ -206,11 +206,42 @@ export const loader = async ({ request }) => {
   if (!shopPlan) {
     shopPlan = await prisma.shopPlan.create({ data: { shop, plan: shopifyPlan } });
   } else if (shopPlan.plan !== shopifyPlan && shopifyPlan !== "free") {
-    // Shopify is the source of truth — sync if different
-    shopPlan = await prisma.shopPlan.update({
-      where: { shop },
-      data: { plan: shopifyPlan },
-    });
+    // Shopify is the source of truth — sync if different (unless promo is active)
+    if (!shopPlan.promoExpiresAt || new Date(shopPlan.promoExpiresAt) < new Date()) {
+      shopPlan = await prisma.shopPlan.update({
+        where: { shop },
+        data: { plan: shopifyPlan },
+      });
+    }
+  }
+
+  // Check if promo has expired
+  let promoActive = false;
+  let promoExpiresAt = null;
+  if (shopPlan.promoCode && shopPlan.promoExpiresAt) {
+    if (new Date(shopPlan.promoExpiresAt) > new Date()) {
+      // Promo still active — ensure plan matches promo level
+      promoActive = true;
+      promoExpiresAt = shopPlan.promoExpiresAt;
+      if (shopPlan.plan !== shopPlan.promoPlan) {
+        shopPlan = await prisma.shopPlan.update({
+          where: { shop },
+          data: { plan: shopPlan.promoPlan },
+        });
+      }
+    } else {
+      // Promo expired — clear promo fields and revert to Shopify plan
+      console.log(`[Promo] Promo expired for ${shop}, reverting to Shopify plan: ${shopifyPlan}`);
+      shopPlan = await prisma.shopPlan.update({
+        where: { shop },
+        data: {
+          plan: shopifyPlan,
+          promoCode: null,
+          promoPlan: null,
+          promoExpiresAt: null,
+        },
+      });
+    }
   }
 
   // Reset monthly edits if we're in a new month
@@ -235,6 +266,9 @@ export const loader = async ({ request }) => {
     automationLimit: limits.automations,
     subscriptionStatus,
     billingInterval,
+    promoActive,
+    promoExpiresAt: promoExpiresAt ? new Date(promoExpiresAt).toISOString() : null,
+    promoCode: shopPlan.promoCode || null,
     isDev: process.env.NODE_ENV !== "production",
   };
 };
@@ -269,6 +303,58 @@ export const action = async ({ request }) => {
     return { success: true, testReset: true };
   }
 
+  /* ── Promo code redemption ── */
+  if (intent === "redeem-promo") {
+    const code = (formData.get("promoCode") || "").trim().toUpperCase();
+    if (!code) return { error: "Please enter a promo code" };
+
+    try {
+      // Look up the promo code
+      const promo = await prisma.promoCode.findUnique({ where: { code } });
+      if (!promo) return { error: "Invalid promo code" };
+      if (!promo.active) return { error: "This promo code is no longer active" };
+      if (promo.usedCount >= promo.maxUses) return { error: "This promo code has reached its maximum uses" };
+
+      // Check if shop already used this code
+      const existing = await prisma.shopPlan.findUnique({ where: { shop } });
+      if (existing?.promoCode === code) return { error: "You've already redeemed this promo code" };
+
+      // Calculate expiration
+      const expiresAt = new Date();
+      expiresAt.setDate(expiresAt.getDate() + promo.durationDays);
+
+      // Apply promo to shop
+      await prisma.shopPlan.upsert({
+        where: { shop },
+        update: {
+          plan: promo.plan,
+          promoCode: code,
+          promoPlan: promo.plan,
+          promoExpiresAt: expiresAt,
+        },
+        create: {
+          shop,
+          plan: promo.plan,
+          promoCode: code,
+          promoPlan: promo.plan,
+          promoExpiresAt: expiresAt,
+        },
+      });
+
+      // Increment usage count
+      await prisma.promoCode.update({
+        where: { code },
+        data: { usedCount: { increment: 1 } },
+      });
+
+      console.log(`[Promo] Shop ${shop} redeemed code ${code} for ${promo.plan} plan until ${expiresAt.toISOString()}`);
+      return { success: true, promoRedeemed: true, promoPlan: promo.plan, promoExpires: expiresAt.toISOString() };
+    } catch (err) {
+      console.error("[Promo] Redemption error:", err);
+      return { error: "Failed to redeem promo code. Please try again." };
+    }
+  }
+
   /* ── Cancel: downgrade to free in our database ── */
   if (intent === "cancel") {
     try {
@@ -291,6 +377,7 @@ export default function Billing() {
   const {
     shop, storeHandle, currentPlan, monthlyEdits, productsPerEdit,
     automationLimit, subscriptionStatus, billingInterval: currentInterval,
+    promoActive, promoExpiresAt, promoCode: activePromoCode,
     isDev,
   } = useLoaderData();
   const fetcher = useFetcher();
@@ -298,6 +385,8 @@ export default function Billing() {
   const shopify = useAppBridge();
   const [showCancelDialog, setShowCancelDialog] = useState(false);
   const [showTestMode, setShowTestMode] = useState(false);
+  const [promoInput, setPromoInput] = useState("");
+  const [showPromoInput, setShowPromoInput] = useState(false);
   const [displayInterval, setDisplayInterval] = useState("monthly");
 
   const isSubmitting = fetcher.state !== "idle";
@@ -317,6 +406,12 @@ export default function Billing() {
     }
     if (fetcher.data?.testReset) {
       shopify.toast.show("Monthly edit counter reset to 0");
+      navigate("/app/billing", { replace: true });
+    }
+    if (fetcher.data?.promoRedeemed) {
+      shopify.toast.show(`Promo code applied! ${fetcher.data.promoPlan.charAt(0).toUpperCase() + fetcher.data.promoPlan.slice(1)} plan active until ${new Date(fetcher.data.promoExpires).toLocaleDateString()}`);
+      setPromoInput("");
+      setShowPromoInput(false);
       navigate("/app/billing", { replace: true });
     }
     if (fetcher.data?.error) {
@@ -358,8 +453,27 @@ export default function Billing() {
               <div style={{ fontSize: "13px", color: "#637381", marginBottom: "4px" }}>Current Plan</div>
               <div style={{ fontSize: "24px", fontWeight: 800, color: "#202223" }}>
                 {currentPlanName}
+                {promoActive && (
+                  <span style={{
+                    fontSize: "12px",
+                    fontWeight: 700,
+                    backgroundColor: "#9333ea",
+                    color: "white",
+                    padding: "3px 10px",
+                    borderRadius: "12px",
+                    marginLeft: "10px",
+                    verticalAlign: "middle",
+                  }}>
+                    PROMO
+                  </span>
+                )}
               </div>
-              {subscriptionStatus && (
+              {promoActive && promoExpiresAt && (
+                <div style={{ fontSize: "12px", color: "#9333ea", marginTop: "2px", fontWeight: 600 }}>
+                  Promo active until {new Date(promoExpiresAt).toLocaleDateString()}
+                </div>
+              )}
+              {subscriptionStatus && !promoActive && (
                 <div style={{ fontSize: "12px", color: "#637381", marginTop: "2px" }}>
                   Status: {subscriptionStatus}{currentInterval ? ` (${currentInterval})` : ""}
                 </div>
@@ -373,6 +487,112 @@ export default function Billing() {
                 Automation rules: <strong>{automationLimit === Infinity ? "Unlimited" : automationLimit === 0 ? "None" : `Up to ${automationLimit}`}</strong>
               </div>
             </div>
+          </div>
+        </s-box>
+      </s-section>
+
+      {/* Promo Code Section */}
+      <s-section>
+        <s-box padding="base">
+          <div style={{ textAlign: "center", padding: "8px 0" }}>
+            {!promoActive ? (
+              <>
+                {!showPromoInput ? (
+                  <button
+                    onClick={() => setShowPromoInput(true)}
+                    style={{
+                      padding: "8px 20px",
+                      borderRadius: "8px",
+                      border: "1px dashed #9333ea",
+                      backgroundColor: "transparent",
+                      color: "#9333ea",
+                      fontWeight: 600,
+                      fontSize: "13px",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Have a promo code?
+                  </button>
+                ) : (
+                  <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                    <input
+                      type="text"
+                      value={promoInput}
+                      onChange={(e) => setPromoInput(e.target.value.toUpperCase())}
+                      placeholder="Enter promo code"
+                      maxLength={20}
+                      style={{
+                        padding: "10px 16px",
+                        borderRadius: "8px",
+                        border: "2px solid #9333ea",
+                        fontSize: "14px",
+                        fontWeight: 700,
+                        letterSpacing: "1px",
+                        textAlign: "center",
+                        width: "200px",
+                        textTransform: "uppercase",
+                        outline: "none",
+                      }}
+                    />
+                    <button
+                      onClick={() => {
+                        if (promoInput.trim()) {
+                          fetcher.submit(
+                            { intent: "redeem-promo", promoCode: promoInput.trim() },
+                            { method: "POST" }
+                          );
+                        }
+                      }}
+                      disabled={isSubmitting || !promoInput.trim()}
+                      style={{
+                        padding: "10px 24px",
+                        borderRadius: "8px",
+                        border: "none",
+                        backgroundColor: "#9333ea",
+                        color: "white",
+                        fontWeight: 700,
+                        fontSize: "14px",
+                        cursor: promoInput.trim() ? "pointer" : "not-allowed",
+                        opacity: isSubmitting || !promoInput.trim() ? 0.6 : 1,
+                      }}
+                    >
+                      {isSubmitting ? "Applying..." : "Apply"}
+                    </button>
+                    <button
+                      onClick={() => { setShowPromoInput(false); setPromoInput(""); }}
+                      style={{
+                        padding: "10px 16px",
+                        borderRadius: "8px",
+                        border: "1px solid #c4cdd5",
+                        backgroundColor: "white",
+                        color: "#637381",
+                        fontSize: "13px",
+                        cursor: "pointer",
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                )}
+              </>
+            ) : (
+              <div style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "8px",
+                padding: "8px 16px",
+                borderRadius: "8px",
+                backgroundColor: "#f3e8ff",
+                border: "1px solid #d8b4fe",
+              }}>
+                <span style={{ fontSize: "13px", color: "#9333ea", fontWeight: 600 }}>
+                  Promo code <strong>{activePromoCode}</strong> applied
+                </span>
+                <span style={{ fontSize: "12px", color: "#7c3aed" }}>
+                  • Expires {new Date(promoExpiresAt).toLocaleDateString()}
+                </span>
+              </div>
+            )}
           </div>
         </s-box>
       </s-section>
@@ -681,6 +901,7 @@ export default function Billing() {
             { q: "How much do I save with yearly billing?", a: "You save 20% with yearly billing compared to monthly. The discount is applied automatically when you select the yearly option." },
             { q: "Can I cancel anytime?", a: "Yes. You can downgrade to Free at any time through the Shopify billing page. You'll keep your paid features until the end of your current billing cycle." },
             { q: "How do I change my plan?", a: "Click the 'Upgrade Your Plan' or 'Change Plan' button above. You'll be taken to Shopify's plan selection page where you can choose a new plan. Shopify handles all billing and proration automatically." },
+            { q: "I have a promo code. How do I use it?", a: "Click the 'Have a promo code?' button on this page, enter your code, and click Apply. If valid, your plan will be upgraded instantly for the duration specified by the promo. When the promo expires, your plan will revert to your active Shopify subscription or Free." },
           ].map((item, i) => (
             <div key={i} style={{ padding: "12px 0", borderBottom: i < 5 ? "1px solid #f1f2f3" : "none" }}>
               <div style={{ fontWeight: 600, fontSize: "14px", color: "#202223", marginBottom: "4px" }}>{item.q}</div>
