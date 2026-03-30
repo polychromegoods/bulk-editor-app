@@ -10,14 +10,132 @@ const PLAN_INFO = {
   premium:   { productsPerEdit: Infinity, automations: Infinity, name: "Premium Pro" },
 };
 
+/* Map Shopify Managed Pricing plan handles → internal plan keys */
+const HANDLE_TO_PLAN = {
+  "bulk-editor-free": "free",
+  "bulk-editor-unlimited": "unlimited",
+  "bulk-editor-pro": "pro",
+  "bulk-editor-premium": "premium",
+};
+
+/* GraphQL query to read the current subscription from Shopify */
+const CURRENT_SUBSCRIPTION_QUERY = `
+  query {
+    currentAppInstallation {
+      activeSubscriptions {
+        id
+        name
+        status
+        lineItems {
+          plan {
+            pricingDetails {
+              ... on AppRecurringPricing {
+                interval
+                price { amount currencyCode }
+              }
+            }
+          }
+        }
+      }
+      allSubscriptions(first: 5, sortKey: CREATED_AT) {
+        nodes {
+          id
+          name
+          status
+          lineItems {
+            plan {
+              pricingDetails {
+                ... on AppRecurringPricing {
+                  interval
+                  planHandle
+                  price { amount currencyCode }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+`;
+
 export const loader = async ({ request }) => {
   const { admin, session } = await authenticate.admin(request);
   const shop = session.shop;
+  const url = new URL(request.url);
+  const chargeId = url.searchParams.get("charge_id");
 
   // Get or create shop plan
   let shopPlan = await prisma.shopPlan.findUnique({ where: { shop } });
   if (!shopPlan) {
     shopPlan = await prisma.shopPlan.create({ data: { shop } });
+  }
+
+  // ─── Sync plan from Shopify (always, but especially important when charge_id is present) ───
+  // Shopify Managed Pricing redirects here with ?charge_id=... after plan approval.
+  // We query Shopify GraphQL to get the real plan and sync our database.
+  let shopifyPlan = "free";
+  try {
+    const response = await admin.graphql(CURRENT_SUBSCRIPTION_QUERY);
+    const data = await response.json();
+    const installation = data?.data?.currentAppInstallation;
+
+    // Check allSubscriptions for planHandle (most reliable)
+    const allSubs = installation?.allSubscriptions?.nodes || [];
+    for (const sub of allSubs) {
+      if (sub.status === "ACTIVE" || sub.status === "ACCEPTED") {
+        const lineItem = sub.lineItems?.[0];
+        const handle = lineItem?.plan?.pricingDetails?.planHandle;
+        if (handle && HANDLE_TO_PLAN[handle]) {
+          shopifyPlan = HANDLE_TO_PLAN[handle];
+          break;
+        }
+        // Fallback: infer from price
+        const price = parseFloat(lineItem?.plan?.pricingDetails?.price?.amount || "0");
+        if (price >= 24) { shopifyPlan = "premium"; break; }
+        if (price >= 14) { shopifyPlan = "pro"; break; }
+        if (price >= 6) { shopifyPlan = "unlimited"; break; }
+      }
+    }
+
+    // Also check activeSubscriptions as fallback
+    if (shopifyPlan === "free") {
+      const activeSubs = installation?.activeSubscriptions || [];
+      if (activeSubs.length > 0) {
+        const lineItem = activeSubs[0].lineItems?.[0];
+        const price = parseFloat(lineItem?.plan?.pricingDetails?.price?.amount || "0");
+        if (price >= 24) shopifyPlan = "premium";
+        else if (price >= 14) shopifyPlan = "pro";
+        else if (price >= 6) shopifyPlan = "unlimited";
+      }
+    }
+
+    if (chargeId) {
+      console.log(`[Dashboard] Shop ${shop}: charge_id=${chargeId}, detected Shopify plan=${shopifyPlan}`);
+    }
+  } catch (err) {
+    console.error("[Dashboard] Failed to query Shopify subscription:", err.message);
+  }
+
+  // Sync database with Shopify's plan (Shopify is source of truth)
+  // Skip sync if promo is active and not expired
+  const promoActive = shopPlan.promoCode && shopPlan.promoExpiresAt && new Date(shopPlan.promoExpiresAt) > new Date();
+  if (!promoActive && shopPlan.plan !== shopifyPlan) {
+    console.log(`[Dashboard] Syncing plan for ${shop}: DB=${shopPlan.plan} → Shopify=${shopifyPlan}`);
+    shopPlan = await prisma.shopPlan.update({
+      where: { shop },
+      data: {
+        plan: shopifyPlan,
+        ...(chargeId ? { chargeId } : {}),
+        ...(shopifyPlan !== "free" ? { trialUsed: true } : {}),
+      },
+    });
+  } else if (chargeId && shopPlan.plan === shopifyPlan) {
+    // Update chargeId even if plan matches
+    shopPlan = await prisma.shopPlan.update({
+      where: { shop },
+      data: { chargeId },
+    });
   }
 
   // Reset monthly edits if new month
@@ -103,7 +221,7 @@ export default function Dashboard() {
 
   return (
     <s-page heading="Dashboard">
-      <s-button slot="primary-action" onClick={() => navigate("/app/bulk-edit")}>
+      <s-button slot="primary-action" variant="primary" onClick={() => navigate("/app/bulk-edit")}>
         Bulk Edit
       </s-button>
 
@@ -242,7 +360,7 @@ export default function Dashboard() {
                   backgroundColor: "#fef3f2",
                   color: "#d72c0d",
                 }}>
-                  🔒 Upgrade Required
+                  Upgrade Required
                 </div>
               )}
             </div>
@@ -256,7 +374,7 @@ export default function Dashboard() {
           <s-box padding="loose" borderWidth="base" borderRadius="base">
             <s-stack direction="block" gap="base" align="center">
               <s-text tone="subdued">No bulk edits yet. Start by editing some prices!</s-text>
-              <s-button onClick={() => navigate("/app/bulk-edit")}>
+              <s-button variant="primary" onClick={() => navigate("/app/bulk-edit")}>
                 Start Bulk Edit
               </s-button>
             </s-stack>
@@ -303,7 +421,7 @@ export default function Dashboard() {
           }}>
             <div style={{ fontSize: "20px", fontWeight: 800, marginBottom: "8px" }}>Need more bulk edits?</div>
             <div style={{ fontSize: "14px", opacity: 0.9, marginBottom: "16px" }}>
-              Upgrade to Pro for 50 edits/month, or Plus for unlimited edits plus automations and scheduling.
+              Upgrade to Unlimited for unrestricted product edits, or Pro for automation rules.
             </div>
             <button
               onClick={() => navigate("/app/billing")}
