@@ -847,16 +847,23 @@ export default function Billing() {
                         Current Plan
                       </div>
                     ) : (
-                      <div style={{
-                        padding: "10px 24px",
-                        borderRadius: "8px",
-                        backgroundColor: "#f6f6f7",
-                        color: "#637381",
-                        fontWeight: 600,
-                        fontSize: "13px",
-                      }}>
-                        {isUpgrade ? "Upgrade available" : "Downgrade available"}
-                      </div>
+                      <button
+                        onClick={handleChangePlan}
+                        style={{
+                          width: "100%",
+                          padding: "12px 24px",
+                          borderRadius: "8px",
+                          border: isUpgrade ? "none" : "1px solid #c4cdd5",
+                          backgroundColor: isUpgrade ? (plan.highlight ? "#2c6ecb" : "#202223") : "white",
+                          color: isUpgrade ? "white" : "#637381",
+                          fontWeight: 700,
+                          fontSize: "14px",
+                          cursor: "pointer",
+                          transition: "all 0.15s",
+                        }}
+                      >
+                        {isUpgrade ? `Upgrade to ${plan.name}` : `Switch to ${plan.name}`}
+                      </button>
                     )}
                   </div>
                 </div>
