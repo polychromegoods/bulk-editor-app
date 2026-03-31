@@ -683,32 +683,6 @@ export default function Billing() {
         </s-section>
       )}
 
-      {/* Change Plan CTA */}
-      <s-section>
-        <s-box padding="base">
-          <div style={{ textAlign: "center", padding: "8px 0" }}>
-            <button
-              onClick={handleChangePlan}
-              style={{
-                padding: "14px 40px",
-                borderRadius: "10px",
-                border: "none",
-                backgroundColor: "#2c6ecb",
-                color: "white",
-                fontWeight: 700,
-                fontSize: "16px",
-                cursor: "pointer",
-                transition: "all 0.15s",
-              }}
-            >
-              {currentPlan === "free" ? "Upgrade Your Plan" : "Change Plan"}
-            </button>
-            <div style={{ fontSize: "12px", color: "#637381", marginTop: "8px" }}>
-              You'll be taken to Shopify's plan selection page to manage your subscription.
-            </div>
-          </div>
-        </s-box>
-      </s-section>
 
       {/* Billing Interval Toggle (display only) */}
       <s-section>
@@ -884,7 +858,7 @@ export default function Billing() {
             { q: "Is there a free trial?", a: "Yes! All paid plans include a 7-day free trial. You won't be charged until the trial ends." },
             { q: "How much do I save with yearly billing?", a: "You save 20% with yearly billing compared to monthly. The discount is applied automatically when you select the yearly option." },
             { q: "Can I cancel anytime?", a: "Yes. You can downgrade to Free at any time through the Shopify billing page. You'll keep your paid features until the end of your current billing cycle." },
-            { q: "How do I change my plan?", a: "Click the 'Upgrade Your Plan' or 'Change Plan' button above. You'll be taken to Shopify's plan selection page where you can choose a new plan. Shopify handles all billing and proration automatically." },
+            { q: "How do I change my plan?", a: "Click the 'Upgrade to...' or 'Switch to...' button on the plan you want. You'll be taken to Shopify's plan selection page to confirm the change. Shopify handles all billing and proration automatically." },
             { q: "I have a promo code. How do I use it?", a: "Click the 'Have a promo code?' button on this page, enter your code, and click Apply. If valid, your plan will be upgraded instantly for the duration specified by the promo. When the promo expires, your plan will revert to your active Shopify subscription or Free." },
           ].map((item, i) => (
             <div key={i} style={{ padding: "12px 0", borderBottom: i < 5 ? "1px solid #f1f2f3" : "none" }}>
