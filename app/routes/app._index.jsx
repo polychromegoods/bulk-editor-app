@@ -90,11 +90,13 @@ export const loader = async ({ request }) => {
           shopifyPlan = HANDLE_TO_PLAN[handle];
           break;
         }
-        // Fallback: infer from price
-        const price = parseFloat(lineItem?.plan?.pricingDetails?.price?.amount || "0");
-        if (price >= 24) { shopifyPlan = "premium"; break; }
-        if (price >= 14) { shopifyPlan = "pro"; break; }
-        if (price >= 6) { shopifyPlan = "unlimited"; break; }
+        // Fallback: infer from price (normalize yearly amounts to monthly)
+        const rawPrice = parseFloat(lineItem?.plan?.pricingDetails?.price?.amount || "0");
+        const interval = lineItem?.plan?.pricingDetails?.interval;
+        const price = interval === "ANNUAL" ? rawPrice / 12 : rawPrice;
+        if (price >= 20) { shopifyPlan = "premium"; break; }
+        if (price >= 10) { shopifyPlan = "pro"; break; }
+        if (price >= 4) { shopifyPlan = "unlimited"; break; }
       }
     }
 
@@ -103,10 +105,12 @@ export const loader = async ({ request }) => {
       const activeSubs = installation?.activeSubscriptions || [];
       if (activeSubs.length > 0) {
         const lineItem = activeSubs[0].lineItems?.[0];
-        const price = parseFloat(lineItem?.plan?.pricingDetails?.price?.amount || "0");
-        if (price >= 24) shopifyPlan = "premium";
-        else if (price >= 14) shopifyPlan = "pro";
-        else if (price >= 6) shopifyPlan = "unlimited";
+        const rawPrice = parseFloat(lineItem?.plan?.pricingDetails?.price?.amount || "0");
+        const interval = lineItem?.plan?.pricingDetails?.interval;
+        const price = interval === "ANNUAL" ? rawPrice / 12 : rawPrice;
+        if (price >= 20) shopifyPlan = "premium";
+        else if (price >= 10) shopifyPlan = "pro";
+        else if (price >= 4) shopifyPlan = "unlimited";
       }
     }
 

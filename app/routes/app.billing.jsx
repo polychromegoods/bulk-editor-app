@@ -185,14 +185,16 @@ export const loader = async ({ request }) => {
         }
       }
 
-      // Fallback: infer plan from price if no planHandle
+      // Fallback: infer plan from price if no planHandle (normalize yearly to monthly)
       if (shopifyPlan === "free" && activeSubs.length > 0) {
         const lineItem = activeSub.lineItems?.[0];
-        const price = parseFloat(lineItem?.plan?.pricingDetails?.price?.amount || "0");
-        if (price >= 24) shopifyPlan = "premium";
-        else if (price >= 14) shopifyPlan = "pro";
-        else if (price >= 6) shopifyPlan = "unlimited";
-        billingInterval = lineItem?.plan?.pricingDetails?.interval === "ANNUAL" ? "yearly" : "monthly";
+        const rawPrice = parseFloat(lineItem?.plan?.pricingDetails?.price?.amount || "0");
+        const interval = lineItem?.plan?.pricingDetails?.interval;
+        const price = interval === "ANNUAL" ? rawPrice / 12 : rawPrice;
+        if (price >= 20) shopifyPlan = "premium";
+        else if (price >= 10) shopifyPlan = "pro";
+        else if (price >= 4) shopifyPlan = "unlimited";
+        billingInterval = interval === "ANNUAL" ? "yearly" : "monthly";
       }
     }
 
@@ -776,7 +778,6 @@ export default function Billing() {
               const currentOrder = PLAN_ORDER[currentPlan] || 0;
               const planOrder = PLAN_ORDER[plan.key] || 0;
               const isUpgrade = planOrder > currentOrder;
-              const isDowngrade = planOrder < currentOrder;
               const price = formatPrice(plan);
 
               return (
@@ -845,42 +846,18 @@ export default function Billing() {
                       }}>
                         Current Plan
                       </div>
-                    ) : isUpgrade ? (
-                      <button
-                        onClick={handleChangePlan}
-                        style={{
-                          width: "100%",
-                          padding: "12px 24px",
-                          borderRadius: "8px",
-                          border: "none",
-                          backgroundColor: plan.highlight ? "#2c6ecb" : "#202223",
-                          color: "white",
-                          fontWeight: 700,
-                          fontSize: "14px",
-                          cursor: "pointer",
-                          transition: "all 0.15s",
-                        }}
-                      >
-                        Upgrade to {plan.name}
-                      </button>
-                    ) : isDowngrade ? (
-                      <button
-                        onClick={handleChangePlan}
-                        style={{
-                          width: "100%",
-                          padding: "10px 24px",
-                          borderRadius: "8px",
-                          border: "1px solid #c4cdd5",
-                          backgroundColor: "white",
-                          color: "#637381",
-                          fontWeight: 600,
-                          fontSize: "14px",
-                          cursor: "pointer",
-                        }}
-                      >
-                        Switch to {plan.name}
-                      </button>
-                    ) : null}
+                    ) : (
+                      <div style={{
+                        padding: "10px 24px",
+                        borderRadius: "8px",
+                        backgroundColor: "#f6f6f7",
+                        color: "#637381",
+                        fontWeight: 600,
+                        fontSize: "13px",
+                      }}>
+                        {isUpgrade ? "Upgrade available" : "Downgrade available"}
+                      </div>
+                    )}
                   </div>
                 </div>
               );
