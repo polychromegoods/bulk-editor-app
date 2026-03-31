@@ -9,6 +9,26 @@ const HANDLE_TO_PLAN = {
   "bulk-editor-premium": "premium",
 };
 
+/* Plan tier ordering for picking the highest active plan */
+const PLAN_TIER = { free: 0, unlimited: 1, pro: 2, premium: 3 };
+
+/* Helper: resolve a subscription's lineItem to an internal plan key */
+function resolveSubPlan(sub) {
+  const lineItem = sub?.lineItems?.[0];
+  if (!lineItem) return null;
+  const details = lineItem.plan?.pricingDetails;
+  const handle = details?.planHandle;
+  if (handle && HANDLE_TO_PLAN[handle]) return HANDLE_TO_PLAN[handle];
+  const rawPrice = parseFloat(details?.price?.amount || "0");
+  if (rawPrice === 0) return null;
+  const interval = details?.interval;
+  const price = interval === "ANNUAL" ? rawPrice / 12 : rawPrice;
+  if (price >= 20) return "premium";
+  if (price >= 10) return "pro";
+  if (price >= 4) return "unlimited";
+  return null;
+}
+
 /**
  * Webhook: APP_SUBSCRIPTIONS_UPDATE
  *
@@ -41,6 +61,8 @@ export const action = async ({ request }) => {
   }
 
   // For ACTIVE/ACCEPTED/FROZEN, query GraphQL to get the current plan handle
+  // IMPORTANT: When upgrading, multiple subscriptions may coexist briefly.
+  // We pick the HIGHEST-TIER plan among all active/accepted subscriptions.
   if (["ACTIVE", "ACCEPTED", "FROZEN"].includes(subscriptionStatus)) {
     let planKey = "free";
 
@@ -48,20 +70,35 @@ export const action = async ({ request }) => {
       const response = await admin.graphql(`
         query {
           currentAppInstallation {
-            allSubscriptions(first: 5, sortKey: CREATED_AT) {
+            activeSubscriptions {
+              id
+              name
+              status
+              lineItems {
+                plan {
+                  pricingDetails {
+                    ... on AppRecurringPricing {
+                      interval
+                      planHandle
+                      price { amount currencyCode }
+                    }
+                  }
+                }
+              }
+            }
+            allSubscriptions(first: 10, sortKey: CREATED_AT) {
               nodes {
                 id
                 name
                 status
+                createdAt
                 lineItems {
                   plan {
                     pricingDetails {
                       ... on AppRecurringPricing {
+                        interval
                         planHandle
-                        price {
-                          amount
-                          currencyCode
-                        }
+                        price { amount currencyCode }
                       }
                     }
                   }
@@ -72,21 +109,25 @@ export const action = async ({ request }) => {
         }
       `);
       const data = await response.json();
-      const allSubs = data?.data?.currentAppInstallation?.allSubscriptions?.nodes || [];
+      const installation = data?.data?.currentAppInstallation;
 
+      // 1. Check activeSubscriptions
+      const activeSubs = installation?.activeSubscriptions || [];
+      for (const sub of activeSubs) {
+        const resolved = resolveSubPlan(sub);
+        if (resolved && (PLAN_TIER[resolved] || 0) > (PLAN_TIER[planKey] || 0)) {
+          planKey = resolved;
+        }
+      }
+
+      // 2. Also check allSubscriptions for ACTIVE/ACCEPTED
+      const allSubs = installation?.allSubscriptions?.nodes || [];
       for (const sub of allSubs) {
         if (sub.status === "ACTIVE" || sub.status === "ACCEPTED") {
-          const lineItem = sub.lineItems?.[0];
-          const handle = lineItem?.plan?.pricingDetails?.planHandle;
-          if (handle && HANDLE_TO_PLAN[handle]) {
-            planKey = HANDLE_TO_PLAN[handle];
-            break;
+          const resolved = resolveSubPlan(sub);
+          if (resolved && (PLAN_TIER[resolved] || 0) > (PLAN_TIER[planKey] || 0)) {
+            planKey = resolved;
           }
-          // Fallback: infer from price
-          const price = parseFloat(lineItem?.plan?.pricingDetails?.price?.amount || "0");
-          if (price >= 24) { planKey = "premium"; break; }
-          if (price >= 14) { planKey = "pro"; break; }
-          if (price >= 6) { planKey = "unlimited"; break; }
         }
       }
     } catch (err) {

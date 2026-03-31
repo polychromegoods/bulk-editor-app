@@ -18,6 +18,9 @@ const HANDLE_TO_PLAN = {
   "bulk-editor-premium": "premium",
 };
 
+/* Plan tier ordering for picking the highest active plan */
+const PLAN_TIER = { free: 0, unlimited: 1, pro: 2, premium: 3 };
+
 /* GraphQL query to read the current subscription from Shopify */
 const CURRENT_SUBSCRIPTION_QUERY = `
   query {
@@ -31,17 +34,19 @@ const CURRENT_SUBSCRIPTION_QUERY = `
             pricingDetails {
               ... on AppRecurringPricing {
                 interval
+                planHandle
                 price { amount currencyCode }
               }
             }
           }
         }
       }
-      allSubscriptions(first: 5, sortKey: CREATED_AT) {
+      allSubscriptions(first: 10, sortKey: CREATED_AT) {
         nodes {
           id
           name
           status
+          createdAt
           lineItems {
             plan {
               pricingDetails {
@@ -59,6 +64,25 @@ const CURRENT_SUBSCRIPTION_QUERY = `
   }
 `;
 
+/* Helper: resolve a subscription's lineItem to an internal plan key */
+function resolveSubscriptionPlan(sub) {
+  const lineItem = sub?.lineItems?.[0];
+  if (!lineItem) return null;
+  const details = lineItem.plan?.pricingDetails;
+  // Try planHandle first (most reliable)
+  const handle = details?.planHandle;
+  if (handle && HANDLE_TO_PLAN[handle]) return HANDLE_TO_PLAN[handle];
+  // Fallback: infer from price (normalize yearly to monthly)
+  const rawPrice = parseFloat(details?.price?.amount || "0");
+  if (rawPrice === 0) return null;
+  const interval = details?.interval;
+  const price = interval === "ANNUAL" ? rawPrice / 12 : rawPrice;
+  if (price >= 20) return "premium";
+  if (price >= 10) return "pro";
+  if (price >= 4) return "unlimited";
+  return null;
+}
+
 export const loader = async ({ request }) => {
   const { admin, session } = await authenticate.admin(request);
   const shop = session.shop;
@@ -74,49 +98,35 @@ export const loader = async ({ request }) => {
   // ─── Sync plan from Shopify (always, but especially important when charge_id is present) ───
   // Shopify Managed Pricing redirects here with ?charge_id=... after plan approval.
   // We query Shopify GraphQL to get the real plan and sync our database.
+  // IMPORTANT: When upgrading, multiple subscriptions may coexist briefly (old ACTIVE + new ACCEPTED).
+  // We must pick the HIGHEST-TIER plan among all active/accepted subscriptions.
   let shopifyPlan = "free";
   try {
     const response = await admin.graphql(CURRENT_SUBSCRIPTION_QUERY);
     const data = await response.json();
     const installation = data?.data?.currentAppInstallation;
 
-    // Check allSubscriptions for planHandle (most reliable)
+    // 1. Check activeSubscriptions first (Shopify's canonical active list)
+    const activeSubs = installation?.activeSubscriptions || [];
+    for (const sub of activeSubs) {
+      const resolved = resolveSubscriptionPlan(sub);
+      if (resolved && (PLAN_TIER[resolved] || 0) > (PLAN_TIER[shopifyPlan] || 0)) {
+        shopifyPlan = resolved;
+      }
+    }
+
+    // 2. Also check allSubscriptions for ACTIVE/ACCEPTED (includes recently approved plans)
     const allSubs = installation?.allSubscriptions?.nodes || [];
     for (const sub of allSubs) {
       if (sub.status === "ACTIVE" || sub.status === "ACCEPTED") {
-        const lineItem = sub.lineItems?.[0];
-        const handle = lineItem?.plan?.pricingDetails?.planHandle;
-        if (handle && HANDLE_TO_PLAN[handle]) {
-          shopifyPlan = HANDLE_TO_PLAN[handle];
-          break;
+        const resolved = resolveSubscriptionPlan(sub);
+        if (resolved && (PLAN_TIER[resolved] || 0) > (PLAN_TIER[shopifyPlan] || 0)) {
+          shopifyPlan = resolved;
         }
-        // Fallback: infer from price (normalize yearly amounts to monthly)
-        const rawPrice = parseFloat(lineItem?.plan?.pricingDetails?.price?.amount || "0");
-        const interval = lineItem?.plan?.pricingDetails?.interval;
-        const price = interval === "ANNUAL" ? rawPrice / 12 : rawPrice;
-        if (price >= 20) { shopifyPlan = "premium"; break; }
-        if (price >= 10) { shopifyPlan = "pro"; break; }
-        if (price >= 4) { shopifyPlan = "unlimited"; break; }
       }
     }
 
-    // Also check activeSubscriptions as fallback
-    if (shopifyPlan === "free") {
-      const activeSubs = installation?.activeSubscriptions || [];
-      if (activeSubs.length > 0) {
-        const lineItem = activeSubs[0].lineItems?.[0];
-        const rawPrice = parseFloat(lineItem?.plan?.pricingDetails?.price?.amount || "0");
-        const interval = lineItem?.plan?.pricingDetails?.interval;
-        const price = interval === "ANNUAL" ? rawPrice / 12 : rawPrice;
-        if (price >= 20) shopifyPlan = "premium";
-        else if (price >= 10) shopifyPlan = "pro";
-        else if (price >= 4) shopifyPlan = "unlimited";
-      }
-    }
-
-    if (chargeId) {
-      console.log(`[Dashboard] Shop ${shop}: charge_id=${chargeId}, detected Shopify plan=${shopifyPlan}`);
-    }
+    console.log(`[Dashboard] Shop ${shop}: detected Shopify plan=${shopifyPlan}${chargeId ? `, charge_id=${chargeId}` : ""}`);
   } catch (err) {
     console.error("[Dashboard] Failed to query Shopify subscription:", err.message);
   }
