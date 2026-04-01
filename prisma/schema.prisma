@@ -118,3 +118,14 @@ model SavedSearch {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 }
+
+model SupportTicket {
+  id          String   @id @default(cuid())
+  shop        String
+  email       String
+  subject     String
+  message     String
+  status      String   @default("open") // open, replied, closed
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}

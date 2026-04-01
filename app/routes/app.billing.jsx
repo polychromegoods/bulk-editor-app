@@ -505,112 +505,6 @@ export default function Billing() {
         </s-box>
       </s-section>
 
-      {/* Promo Code Section */}
-      <s-section>
-        <s-box padding="base">
-          <div style={{ textAlign: "center", padding: "8px 0" }}>
-            {!promoActive ? (
-              <>
-                {!showPromoInput ? (
-                  <button
-                    onClick={() => setShowPromoInput(true)}
-                    style={{
-                      padding: "8px 20px",
-                      borderRadius: "8px",
-                      border: "1px dashed #9333ea",
-                      backgroundColor: "transparent",
-                      color: "#9333ea",
-                      fontWeight: 600,
-                      fontSize: "13px",
-                      cursor: "pointer",
-                    }}
-                  >
-                    Have a promo code?
-                  </button>
-                ) : (
-                  <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                    <input
-                      type="text"
-                      value={promoInput}
-                      onChange={(e) => setPromoInput(e.target.value.toUpperCase())}
-                      placeholder="Enter promo code"
-                      maxLength={20}
-                      style={{
-                        padding: "10px 16px",
-                        borderRadius: "8px",
-                        border: "2px solid #9333ea",
-                        fontSize: "14px",
-                        fontWeight: 700,
-                        letterSpacing: "1px",
-                        textAlign: "center",
-                        width: "200px",
-                        textTransform: "uppercase",
-                        outline: "none",
-                      }}
-                    />
-                    <button
-                      onClick={() => {
-                        if (promoInput.trim()) {
-                          fetcher.submit(
-                            { intent: "redeem-promo", promoCode: promoInput.trim() },
-                            { method: "POST" }
-                          );
-                        }
-                      }}
-                      disabled={isSubmitting || !promoInput.trim()}
-                      style={{
-                        padding: "10px 24px",
-                        borderRadius: "8px",
-                        border: "none",
-                        backgroundColor: "#9333ea",
-                        color: "white",
-                        fontWeight: 700,
-                        fontSize: "14px",
-                        cursor: promoInput.trim() ? "pointer" : "not-allowed",
-                        opacity: isSubmitting || !promoInput.trim() ? 0.6 : 1,
-                      }}
-                    >
-                      {isSubmitting ? "Applying..." : "Apply"}
-                    </button>
-                    <button
-                      onClick={() => { setShowPromoInput(false); setPromoInput(""); }}
-                      style={{
-                        padding: "10px 16px",
-                        borderRadius: "8px",
-                        border: "1px solid #c4cdd5",
-                        backgroundColor: "white",
-                        color: "#637381",
-                        fontSize: "13px",
-                        cursor: "pointer",
-                      }}
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                )}
-              </>
-            ) : (
-              <div style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "8px",
-                padding: "8px 16px",
-                borderRadius: "8px",
-                backgroundColor: "#f3e8ff",
-                border: "1px solid #d8b4fe",
-              }}>
-                <span style={{ fontSize: "13px", color: "#9333ea", fontWeight: 600 }}>
-                  Promo code <strong>{activePromoCode}</strong> applied
-                </span>
-                <span style={{ fontSize: "12px", color: "#7c3aed" }}>
-                  • Expires {new Date(promoExpiresAt).toLocaleDateString()}
-                </span>
-              </div>
-            )}
-          </div>
-        </s-box>
-      </s-section>
-
       {/* Test Mode Panel — dev stores only */}
       {isDev && (
         <s-section>
@@ -878,6 +772,112 @@ export default function Billing() {
               <div style={{ fontSize: "13px", color: "#637381" }}>{item.a}</div>
             </div>
           ))}
+        </s-box>
+      </s-section>
+
+      {/* Promo Code Section */}
+      <s-section>
+        <s-box padding="base">
+          <div style={{ textAlign: "center", padding: "8px 0" }}>
+            {!promoActive ? (
+              <>
+                {!showPromoInput ? (
+                  <button
+                    onClick={() => setShowPromoInput(true)}
+                    style={{
+                      padding: "8px 20px",
+                      borderRadius: "8px",
+                      border: "1px dashed #9333ea",
+                      backgroundColor: "transparent",
+                      color: "#9333ea",
+                      fontWeight: 600,
+                      fontSize: "13px",
+                      cursor: "pointer",
+                    }}
+                  >
+                    Have a promo code?
+                  </button>
+                ) : (
+                  <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                    <input
+                      type="text"
+                      value={promoInput}
+                      onChange={(e) => setPromoInput(e.target.value.toUpperCase())}
+                      placeholder="Enter promo code"
+                      maxLength={20}
+                      style={{
+                        padding: "10px 16px",
+                        borderRadius: "8px",
+                        border: "2px solid #9333ea",
+                        fontSize: "14px",
+                        fontWeight: 700,
+                        letterSpacing: "1px",
+                        textAlign: "center",
+                        width: "200px",
+                        textTransform: "uppercase",
+                        outline: "none",
+                      }}
+                    />
+                    <button
+                      onClick={() => {
+                        if (promoInput.trim()) {
+                          fetcher.submit(
+                            { intent: "redeem-promo", promoCode: promoInput.trim() },
+                            { method: "POST" }
+                          );
+                        }
+                      }}
+                      disabled={isSubmitting || !promoInput.trim()}
+                      style={{
+                        padding: "10px 24px",
+                        borderRadius: "8px",
+                        border: "none",
+                        backgroundColor: "#9333ea",
+                        color: "white",
+                        fontWeight: 700,
+                        fontSize: "14px",
+                        cursor: promoInput.trim() ? "pointer" : "not-allowed",
+                        opacity: isSubmitting || !promoInput.trim() ? 0.6 : 1,
+                      }}
+                    >
+                      {isSubmitting ? "Applying..." : "Apply"}
+                    </button>
+                    <button
+                      onClick={() => { setShowPromoInput(false); setPromoInput(""); }}
+                      style={{
+                        padding: "10px 16px",
+                        borderRadius: "8px",
+                        border: "1px solid #c4cdd5",
+                        backgroundColor: "white",
+                        color: "#637381",
+                        fontSize: "13px",
+                        cursor: "pointer",
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                )}
+              </>
+            ) : (
+              <div style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "8px",
+                padding: "8px 16px",
+                borderRadius: "8px",
+                backgroundColor: "#f3e8ff",
+                border: "1px solid #d8b4fe",
+              }}>
+                <span style={{ fontSize: "13px", color: "#9333ea", fontWeight: 600 }}>
+                  Promo code <strong>{activePromoCode}</strong> applied
+                </span>
+                <span style={{ fontSize: "12px", color: "#7c3aed" }}>
+                  • Expires {new Date(promoExpiresAt).toLocaleDateString()}
+                </span>
+              </div>
+            )}
+          </div>
         </s-box>
       </s-section>
     </s-page>
