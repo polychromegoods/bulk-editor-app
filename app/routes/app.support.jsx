@@ -4,6 +4,7 @@ import { useAppBridge } from "@shopify/app-bridge-react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import prisma from "../db.server";
+import nodemailer from "nodemailer";
 
 export const loader = async ({ request }) => {
   const { session } = await authenticate.admin(request);
@@ -51,37 +52,46 @@ export const action = async ({ request }) => {
         data: { shop, email, subject, message },
       });
 
-      // Send email notification via Shopify's admin GraphQL (using a simple fetch to an email service)
-      // For now, we log it and the owner can check the database
       console.log(`[Support] New ticket from ${shop} (${email}): ${subject}`);
       console.log(`[Support] Ticket ID: ${ticket.id}`);
-      console.log(`[Support] Message: ${message}`);
 
-      // Try to send email notification to hello@polychromegoods.com
+      // Send email notification to hello@polychromegoods.com via Gmail
       try {
-        const emailBody = [
-          `New Support Ticket from Bulk Editor ProX`,
-          ``,
-          `Shop: ${shop}`,
-          `Email: ${email}`,
-          `Subject: ${subject}`,
-          ``,
-          `Message:`,
-          message,
-          ``,
-          `Ticket ID: ${ticket.id}`,
-          `Submitted: ${new Date().toISOString()}`,
-        ].join("\n");
+        const transporter = nodemailer.createTransport({
+          service: "gmail",
+          auth: {
+            user: "hello@polychromegoods.com",
+            pass: process.env.GMAIL_APP_PASSWORD,
+          },
+        });
 
-        // Use a simple webhook/email approach - send via fetch to a mail endpoint
-        // This uses Shopify's built-in email capability through the admin API
-        // For production, you'd integrate with SendGrid, Mailgun, etc.
-        // For now, tickets are stored in the database and logged
-        console.log(`[Support] Email notification would be sent to hello@polychromegoods.com`);
-        console.log(`[Support] Body:\n${emailBody}`);
+        await transporter.sendMail({
+          from: '"Bulk Editor ProX" <hello@polychromegoods.com>',
+          to: "hello@polychromegoods.com",
+          replyTo: email,
+          subject: `[Support Ticket] ${subject}`,
+          text: [
+            `New Support Ticket from Bulk Editor ProX`,
+            ``,
+            `Shop: ${shop}`,
+            `Customer Email: ${email}`,
+            `Subject: ${subject}`,
+            ``,
+            `Message:`,
+            message,
+            ``,
+            `---`,
+            `Ticket ID: ${ticket.id}`,
+            `Submitted: ${new Date().toISOString()}`,
+            ``,
+            `Reply directly to this email to respond to the customer.`,
+          ].join("\n"),
+        });
+
+        console.log(`[Support] Email notification sent to hello@polychromegoods.com`);
       } catch (emailErr) {
         console.error("[Support] Failed to send email notification:", emailErr.message);
-        // Don't fail the ticket submission if email fails
+        // Don't fail the ticket submission if email notification fails
       }
 
       return { success: true, ticketId: ticket.id };
