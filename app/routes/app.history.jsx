@@ -22,6 +22,7 @@ export const loader = async ({ request }) => {
     where.changeSource = source;
   }
 
+  // Get history grouped by bulkEditId
   const [history, totalCount, bulkEdits] = await Promise.all([
     prisma.priceHistory.findMany({
       where,
@@ -33,13 +34,13 @@ export const loader = async ({ request }) => {
     prisma.bulkEdit.findMany({
       where: { shop },
       orderBy: { createdAt: "desc" },
-      take: 10,
+      take: 50,
     }),
   ]);
 
   const totalPages = Math.ceil(totalCount / pageSize);
 
-  // Compute summary stats using efficient aggregate query instead of loading all records
+  // Compute summary stats
   let stats = { totalChanges: 0, decreaseCount: 0, increaseCount: 0, totalSaved: "0.00", totalIncreased: "0.00" };
   try {
     const totalChanges = await prisma.priceHistory.count({ where: { shop } });
@@ -90,49 +91,79 @@ export const action = async ({ request }) => {
     return { success: true, cleared: true };
   }
 
-  if (intent === "revert_single") {
-    const productId = formData.get("productId");
-    const variantId = formData.get("variantId");
-    const oldPrice = formData.get("oldPrice");
+  if (intent === "revert_run") {
+    const bulkEditId = formData.get("bulkEditId");
+    if (!bulkEditId) return { success: false, error: "No bulk edit ID provided" };
 
-    try {
-      const mutation = `#graphql
-        mutation productVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
-          productVariantsBulkUpdate(productId: $productId, variants: $variants) {
-            productVariants { id price }
-            userErrors { field message }
-          }
-        }`;
+    // Get all history records for this run
+    const records = await prisma.priceHistory.findMany({
+      where: { shop, bulkEditId, changeSource: { not: "manual_revert" } },
+      orderBy: { createdAt: "desc" },
+    });
 
-      const result = await admin.graphql(mutation, {
-        variables: { productId, variants: [{ id: variantId, price: oldPrice }] },
-      });
-      const resultData = await result.json();
-      const userErrors = resultData.data?.productVariantsBulkUpdate?.userErrors || [];
+    if (records.length === 0) return { success: false, error: "No changes found for this run" };
 
-      if (userErrors.length > 0) {
-        return { success: false, error: userErrors[0].message };
-      }
+    let successCount = 0;
+    let errorCount = 0;
 
-      // Record the revert in history
-      await prisma.priceHistory.create({
-        data: {
-          shop,
-          productId,
-          variantId,
-          productTitle: formData.get("productTitle") || "Unknown",
-          variantTitle: formData.get("variantTitle") || null,
-          oldPrice: formData.get("currentPrice"),
-          newPrice: oldPrice,
-          changeType: "revert",
-          changeSource: "manual_revert",
-        },
-      });
-
-      return { success: true, reverted: true };
-    } catch (err) {
-      return { success: false, error: err.message };
+    // Group by product for efficient mutation
+    const byProduct = {};
+    for (const rec of records) {
+      if (!byProduct[rec.productId]) byProduct[rec.productId] = [];
+      byProduct[rec.productId].push(rec);
     }
+
+    for (const [productId, recs] of Object.entries(byProduct)) {
+      try {
+        const variants = recs
+          .filter(r => r.variantId && r.variantId !== productId)
+          .map(r => ({ id: r.variantId, price: r.oldPrice }));
+
+        if (variants.length > 0) {
+          const mutation = `#graphql
+            mutation productVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
+              productVariantsBulkUpdate(productId: $productId, variants: $variants) {
+                productVariants { id price }
+                userErrors { field message }
+              }
+            }`;
+
+          const result = await admin.graphql(mutation, {
+            variables: { productId, variants },
+          });
+          const resultData = await result.json();
+          const userErrors = resultData.data?.productVariantsBulkUpdate?.userErrors || [];
+
+          if (userErrors.length > 0) {
+            errorCount += variants.length;
+          } else {
+            successCount += variants.length;
+            // Record reverts in history
+            for (const rec of recs.filter(r => r.variantId && r.variantId !== productId)) {
+              await prisma.priceHistory.create({
+                data: {
+                  shop,
+                  productId: rec.productId,
+                  variantId: rec.variantId,
+                  productTitle: rec.productTitle,
+                  variantTitle: rec.variantTitle,
+                  oldPrice: rec.newPrice,
+                  newPrice: rec.oldPrice,
+                  changeType: "revert",
+                  changeSource: "manual_revert",
+                  bulkEditName: `Undo: ${rec.bulkEditName || "Bulk Edit"}`,
+                },
+              });
+            }
+          }
+        }
+      } catch (err) {
+        errorCount += recs.length;
+        console.error(`[History] Revert error for product ${productId}:`, err.message);
+      }
+    }
+
+    return { success: true, reverted: true, successCount, errorCount };
   }
 
   return { error: "Unknown intent" };
@@ -145,14 +176,56 @@ export default function History() {
   const shopify = useAppBridge();
   const [searchValue, setSearchValue] = useState(search);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
-  const tableRef = useRef(null);
+  const [expandedRuns, setExpandedRuns] = useState(new Set());
+  const [revertingRun, setRevertingRun] = useState(null);
 
-  // Compact number formatter for large prices
+  // Group history entries by bulkEditId (or by date if no bulkEditId)
+  const groupedHistory = (() => {
+    const groups = [];
+    const byEditId = {};
+    const ungrouped = [];
+
+    for (const entry of history) {
+      if (entry.bulkEditId) {
+        if (!byEditId[entry.bulkEditId]) {
+          byEditId[entry.bulkEditId] = {
+            id: entry.bulkEditId,
+            name: entry.bulkEditName || "Bulk Edit",
+            source: entry.changeSource,
+            entries: [],
+            createdAt: entry.createdAt,
+          };
+        }
+        byEditId[entry.bulkEditId].entries.push(entry);
+      } else {
+        ungrouped.push(entry);
+      }
+    }
+
+    // Add grouped runs
+    for (const group of Object.values(byEditId)) {
+      groups.push(group);
+    }
+
+    // Add ungrouped entries as individual "runs"
+    for (const entry of ungrouped) {
+      groups.push({
+        id: entry.id,
+        name: entry.bulkEditName || "Single Edit",
+        source: entry.changeSource,
+        entries: [entry],
+        createdAt: entry.createdAt,
+      });
+    }
+
+    // Sort by most recent first
+    groups.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    return groups;
+  })();
+
   const formatPrice = (priceStr) => {
     const num = parseFloat(priceStr);
     if (isNaN(num)) return priceStr;
-    if (Math.abs(num) >= 1e12) return `$${(num / 1e12).toFixed(1)}T`;
-    if (Math.abs(num) >= 1e9) return `$${(num / 1e9).toFixed(1)}B`;
     if (Math.abs(num) >= 1e6) return `$${(num / 1e6).toFixed(1)}M`;
     if (Math.abs(num) >= 1e4) return `$${num.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     return `$${priceStr}`;
@@ -161,11 +234,54 @@ export default function History() {
   const formatDiff = (diff) => {
     const abs = Math.abs(diff);
     const sign = diff > 0 ? "+" : diff < 0 ? "-" : "";
-    if (abs >= 1e12) return `${sign}$${(abs / 1e12).toFixed(1)}T`;
-    if (abs >= 1e9) return `${sign}$${(abs / 1e9).toFixed(1)}B`;
     if (abs >= 1e6) return `${sign}$${(abs / 1e6).toFixed(1)}M`;
-    if (abs >= 1e4) return `${sign}$${abs.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     return `${diff > 0 ? "+" : ""}${diff.toFixed(2)}`;
+  };
+
+  const toggleExpand = (runId) => {
+    setExpandedRuns(prev => {
+      const next = new Set(prev);
+      next.has(runId) ? next.delete(runId) : next.add(runId);
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    if (fetcher.data?.success && fetcher.data?.reverted) {
+      shopify.toast.show(`Reverted ${fetcher.data.successCount} changes!`);
+      setRevertingRun(null);
+    }
+    if (fetcher.data?.success && fetcher.data?.cleared) {
+      shopify.toast.show("History cleared!");
+    }
+    if (fetcher.data?.error) {
+      shopify.toast.show("Error: " + fetcher.data.error);
+      setRevertingRun(null);
+    }
+  }, [fetcher.data, shopify]);
+
+  const handleSearch = () => {
+    const params = new URLSearchParams();
+    if (searchValue) params.set("search", searchValue);
+    if (source) params.set("source", source);
+    navigate(`/app/history?${params.toString()}`);
+  };
+
+  const handleSourceFilter = (newSource) => {
+    const params = new URLSearchParams();
+    if (searchValue) params.set("search", searchValue);
+    if (newSource) params.set("source", newSource);
+    navigate(`/app/history?${params.toString()}`);
+  };
+
+  const handleRevertRun = (bulkEditId) => {
+    setRevertingRun(bulkEditId);
+    fetcher.submit({ intent: "revert_run", bulkEditId }, { method: "POST" });
+  };
+
+  const handleCloneRun = (bulkEditId) => {
+    // Navigate to bulk edit with clone parameter
+    navigate(`/app/bulk-edit?clone=${bulkEditId}`);
   };
 
   const handleNextPage = useCallback(() => {
@@ -186,50 +302,6 @@ export default function History() {
     navigate(`/app/history?${params.toString()}`);
   }, [page, search, source, navigate]);
 
-  // Ref-based event listeners for s-table pagination (React 18 custom element event fix)
-  useEffect(() => {
-    const tableEl = tableRef.current;
-    if (!tableEl) return;
-    const onNext = () => handleNextPage();
-    const onPrev = () => handlePrevPage();
-    tableEl.addEventListener("nextpage", onNext);
-    tableEl.addEventListener("previouspage", onPrev);
-    tableEl.addEventListener("nextPage", onNext);
-    tableEl.addEventListener("previousPage", onPrev);
-    return () => {
-      tableEl.removeEventListener("nextpage", onNext);
-      tableEl.removeEventListener("previouspage", onPrev);
-      tableEl.removeEventListener("nextPage", onNext);
-      tableEl.removeEventListener("previousPage", onPrev);
-    };
-  }, [handleNextPage, handlePrevPage]);
-
-  useEffect(() => {
-    if (fetcher.data?.success && fetcher.data?.reverted) {
-      shopify.toast.show("Price reverted to original value!");
-    }
-    if (fetcher.data?.success && fetcher.data?.cleared) {
-      shopify.toast.show("History cleared!");
-    }
-    if (fetcher.data?.error) {
-      shopify.toast.show("Error: " + fetcher.data.error);
-    }
-  }, [fetcher.data, shopify]);
-
-  const handleSearch = () => {
-    const params = new URLSearchParams();
-    if (searchValue) params.set("search", searchValue);
-    if (source) params.set("source", source);
-    navigate(`/app/history?${params.toString()}`);
-  };
-
-  const handleSourceFilter = (newSource) => {
-    const params = new URLSearchParams();
-    if (searchValue) params.set("search", searchValue);
-    if (newSource) params.set("source", newSource);
-    navigate(`/app/history?${params.toString()}`);
-  };
-
   const badgeStyle = (tone) => ({
     display: "inline-block",
     padding: "2px 8px",
@@ -240,8 +312,10 @@ export default function History() {
     color: tone === "success" ? "#1a7f37" : tone === "critical" ? "#d72c0d" : tone === "warning" ? "#916a00" : "#637381",
   });
 
+  const isReverting = fetcher.state !== "idle";
+
   return (
-    <s-page heading="Price History">
+    <s-page heading="Edit History">
       {totalCount > 0 && (
         <s-button
           slot="secondary-action"
@@ -255,22 +329,22 @@ export default function History() {
       {/* Stats summary */}
       {stats.totalChanges > 0 && (
         <s-section>
-          <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
-            <div style={{ flex: 1, minWidth: "120px", padding: "16px", border: "1px solid #e1e3e5", borderRadius: "10px", textAlign: "center", borderTop: "3px solid #2c6ecb" }}>
-              <div style={{ fontSize: "24px", fontWeight: 700, color: "#202223" }}>{stats.totalChanges.toLocaleString()}</div>
-              <div style={{ fontSize: "12px", color: "#637381" }}>Total Changes</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(100px, 1fr))", gap: "8px" }}>
+            <div style={{ padding: "12px", border: "1px solid #e1e3e5", borderRadius: "10px", textAlign: "center", borderTop: "3px solid #2c6ecb" }}>
+              <div style={{ fontSize: "20px", fontWeight: 700, color: "#202223" }}>{stats.totalChanges.toLocaleString()}</div>
+              <div style={{ fontSize: "11px", color: "#637381" }}>Total Changes</div>
             </div>
-            <div style={{ flex: 1, minWidth: "120px", padding: "16px", border: "1px solid #e1e3e5", borderRadius: "10px", textAlign: "center", borderTop: "3px solid #1a7f37" }}>
-              <div style={{ fontSize: "24px", fontWeight: 700, color: "#1a7f37" }}>{stats.decreaseCount.toLocaleString()}</div>
-              <div style={{ fontSize: "12px", color: "#637381" }}>Price Decreases</div>
+            <div style={{ padding: "12px", border: "1px solid #e1e3e5", borderRadius: "10px", textAlign: "center", borderTop: "3px solid #1a7f37" }}>
+              <div style={{ fontSize: "20px", fontWeight: 700, color: "#1a7f37" }}>{stats.decreaseCount.toLocaleString()}</div>
+              <div style={{ fontSize: "11px", color: "#637381" }}>Decreases</div>
             </div>
-            <div style={{ flex: 1, minWidth: "120px", padding: "16px", border: "1px solid #e1e3e5", borderRadius: "10px", textAlign: "center", borderTop: "3px solid #d72c0d" }}>
-              <div style={{ fontSize: "24px", fontWeight: 700, color: "#d72c0d" }}>{stats.increaseCount.toLocaleString()}</div>
-              <div style={{ fontSize: "12px", color: "#637381" }}>Price Increases</div>
+            <div style={{ padding: "12px", border: "1px solid #e1e3e5", borderRadius: "10px", textAlign: "center", borderTop: "3px solid #d72c0d" }}>
+              <div style={{ fontSize: "20px", fontWeight: 700, color: "#d72c0d" }}>{stats.increaseCount.toLocaleString()}</div>
+              <div style={{ fontSize: "11px", color: "#637381" }}>Increases</div>
             </div>
-            <div style={{ flex: 1, minWidth: "120px", padding: "16px", border: "1px solid #e1e3e5", borderRadius: "10px", textAlign: "center", borderTop: "3px solid #637381" }}>
-              <div style={{ fontSize: "24px", fontWeight: 700, color: "#202223" }}>{bulkEdits.length}</div>
-              <div style={{ fontSize: "12px", color: "#637381" }}>Bulk Edits</div>
+            <div style={{ padding: "12px", border: "1px solid #e1e3e5", borderRadius: "10px", textAlign: "center", borderTop: "3px solid #637381" }}>
+              <div style={{ fontSize: "20px", fontWeight: 700, color: "#202223" }}>{bulkEdits.length}</div>
+              <div style={{ fontSize: "11px", color: "#637381" }}>Bulk Edits</div>
             </div>
           </div>
         </s-section>
@@ -279,7 +353,7 @@ export default function History() {
       {/* Search and filters */}
       <s-section>
         <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
-          <div style={{ flex: 1, minWidth: "200px" }}>
+          <div style={{ flex: 1, minWidth: "150px" }}>
             <input
               type="text"
               placeholder="Search by product name..."
@@ -289,7 +363,7 @@ export default function History() {
               style={{ width: "100%", padding: "8px 12px", border: "1px solid #c4cdd5", borderRadius: "8px", fontSize: "14px", boxSizing: "border-box" }}
             />
           </div>
-          <button onClick={handleSearch} style={{ padding: "8px 16px", borderRadius: "8px", border: "1px solid #c4cdd5", backgroundColor: "white", cursor: "pointer", fontSize: "14px" }}>Search</button>
+          <button onClick={handleSearch} style={{ padding: "8px 12px", borderRadius: "8px", border: "1px solid #c4cdd5", backgroundColor: "white", cursor: "pointer", fontSize: "14px" }}>Search</button>
           <select
             value={source}
             onChange={(e) => handleSourceFilter(e.target.value)}
@@ -305,13 +379,14 @@ export default function History() {
               onClick={() => { setSearchValue(""); navigate("/app/history"); }}
               style={{ padding: "4px 10px", borderRadius: "16px", border: "1px solid #d72c0d", backgroundColor: "#fef3f2", color: "#d72c0d", fontSize: "12px", cursor: "pointer" }}
             >
-              Clear filters ✕
+              Clear ✕
             </button>
           )}
         </div>
       </s-section>
 
-      {history.length === 0 ? (
+      {/* Grouped edit runs */}
+      {groupedHistory.length === 0 ? (
         <s-section>
           <s-box padding="loose" borderWidth="base" borderRadius="base">
             <s-stack direction="block" gap="base" align="center">
@@ -328,141 +403,140 @@ export default function History() {
           </s-box>
         </s-section>
       ) : (
-        <s-section padding="none">
-          <s-table
-            ref={tableRef}
-            paginate={totalPages > 1}
-            hasNextPage={page < totalPages}
-            hasPreviousPage={page > 1}
-          >
-            <s-table-header-row>
-              <s-table-header>Product</s-table-header>
-              <s-table-header>Variant</s-table-header>
-              <s-table-header format="currency">Old Price</s-table-header>
-              <s-table-header format="currency">New Price</s-table-header>
-              <s-table-header>Change</s-table-header>
-              <s-table-header>Edit Name</s-table-header>
-              <s-table-header>Source</s-table-header>
-              <s-table-header>Date</s-table-header>
-              <s-table-header>Actions</s-table-header>
-            </s-table-header-row>
-            <s-table-body>
-              {history.map((entry) => {
-                const oldPrice = parseFloat(entry.oldPrice);
-                const newPrice = parseFloat(entry.newPrice);
-                const diff = newPrice - oldPrice;
-                const pctChange = oldPrice > 0 ? ((diff / oldPrice) * 100).toFixed(1) : "N/A";
-                const isRevert = entry.changeSource === "manual_revert";
-                return (
-                  <s-table-row key={entry.id}>
-                    <s-table-cell>
-                      <s-text fontWeight="bold">
-                        <span style={{ display: "block", wordBreak: "break-word", overflowWrap: "break-word", minWidth: "0" }} title={entry.productTitle}>
-                          {entry.productTitle}
-                        </span>
-                      </s-text>
-                    </s-table-cell>
-                    <s-table-cell>
-                      <s-text tone="subdued">{entry.variantTitle || "Default"}</s-text>
-                    </s-table-cell>
-                    <s-table-cell>{formatPrice(entry.oldPrice)}</s-table-cell>
-                    <s-table-cell>
-                      <s-text fontWeight="bold">{formatPrice(entry.newPrice)}</s-text>
-                    </s-table-cell>
-                    <s-table-cell>
-                      <s-text
-                        tone={diff < 0 ? "critical" : diff > 0 ? "success" : "subdued"}
-                      >
-                        {formatDiff(diff)} ({pctChange}%)
-                      </s-text>
-                    </s-table-cell>
-                    <s-table-cell>
-                      <s-text tone="subdued" variant="bodySm">
-                        {entry.bulkEditName || "—"}
-                      </s-text>
-                    </s-table-cell>
-                    <s-table-cell>
-                      <span style={badgeStyle(isRevert ? "warning" : "default")}>
-                        {entry.changeSource.replace(/_/g, " ")}
-                      </span>
-                    </s-table-cell>
-                    <s-table-cell>
-                      {new Date(entry.createdAt).toLocaleString()}
-                    </s-table-cell>
-                    <s-table-cell>
-                      {!isRevert && (
-                        <button
-                          onClick={() => {
-                            fetcher.submit(
-                              {
-                                intent: "revert_single",
-                                productId: entry.productId,
-                                variantId: entry.variantId,
-                                oldPrice: entry.oldPrice,
-                                currentPrice: entry.newPrice,
-                                productTitle: entry.productTitle,
-                                variantTitle: entry.variantTitle || "",
-                              },
-                              { method: "POST" }
-                            );
-                          }}
-                          style={{
-                            border: "none",
-                            background: "none",
-                            color: "#2c6ecb",
-                            cursor: "pointer",
-                            fontSize: "13px",
-                            fontWeight: 600,
-                            padding: "4px 8px",
-                            borderRadius: "4px",
-                          }}
-                          title={`Revert to $${entry.oldPrice}`}
-                        >
-                          ↩ Undo
-                        </button>
-                      )}
-                    </s-table-cell>
-                  </s-table-row>
-                );
-              })}
-            </s-table-body>
-          </s-table>
+        <s-section>
+          <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+            {groupedHistory.map((run) => {
+              const isExpanded = expandedRuns.has(run.id);
+              const changeCount = run.entries.length;
+              const isRevert = run.source === "manual_revert";
+              const uniqueProducts = [...new Set(run.entries.map(e => e.productTitle))];
+              const netChange = run.entries.reduce((sum, e) => {
+                return sum + (parseFloat(e.newPrice) - parseFloat(e.oldPrice));
+              }, 0);
+
+              return (
+                <div key={run.id} style={{ border: "1px solid #e1e3e5", borderRadius: "12px", overflow: "hidden", backgroundColor: "white" }}>
+                  {/* Run header - always visible */}
+                  <div
+                    style={{ padding: "12px 16px", cursor: "pointer", backgroundColor: isExpanded ? "#f9fafb" : "white", transition: "background-color 0.15s" }}
+                    onClick={() => toggleExpand(run.id)}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+                      <span style={{ fontSize: "14px", transform: isExpanded ? "rotate(90deg)" : "rotate(0deg)", transition: "transform 0.15s", flexShrink: 0 }}>▶</span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                          <span style={{ fontWeight: 700, fontSize: "14px", color: "#202223" }}>{run.name}</span>
+                          <span style={badgeStyle(isRevert ? "warning" : "success")}>
+                            {changeCount} change{changeCount !== 1 ? "s" : ""}
+                          </span>
+                          <span style={badgeStyle(isRevert ? "warning" : "default")}>
+                            {run.source.replace(/_/g, " ")}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: "12px", color: "#637381", marginTop: "2px" }}>
+                          {uniqueProducts.length} product{uniqueProducts.length !== 1 ? "s" : ""} • {new Date(run.createdAt).toLocaleString()}
+                          {netChange !== 0 && (
+                            <span style={{ marginLeft: "8px", color: netChange < 0 ? "#d72c0d" : "#1a7f37", fontWeight: 600 }}>
+                              Net: {netChange > 0 ? "+" : ""}{formatDiff(netChange)}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      {/* Action buttons */}
+                      <div style={{ display: "flex", gap: "6px", flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
+                        {!isRevert && run.entries.length > 0 && run.entries[0].bulkEditId && (
+                          <>
+                            <button
+                              onClick={() => handleCloneRun(run.entries[0].bulkEditId)}
+                              style={{ padding: "4px 10px", borderRadius: "6px", border: "1px solid #c4cdd5", backgroundColor: "white", cursor: "pointer", fontSize: "12px", fontWeight: 600, color: "#2c6ecb" }}
+                              title="Clone this edit and run it again"
+                            >
+                              Clone
+                            </button>
+                            <button
+                              onClick={() => handleRevertRun(run.entries[0].bulkEditId)}
+                              disabled={isReverting}
+                              style={{ padding: "4px 10px", borderRadius: "6px", border: "1px solid #d72c0d", backgroundColor: revertingRun === run.entries[0].bulkEditId ? "#fef3f2" : "white", cursor: isReverting ? "default" : "pointer", fontSize: "12px", fontWeight: 600, color: "#d72c0d", opacity: isReverting ? 0.6 : 1 }}
+                              title="Undo all changes in this run"
+                            >
+                              {revertingRun === run.entries[0].bulkEditId ? "Undoing..." : "Undo Run"}
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Expanded detail */}
+                  {isExpanded && (
+                    <div style={{ borderTop: "1px solid #e1e3e5" }}>
+                      <div style={{ overflowX: "auto" }}>
+                        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
+                          <thead>
+                            <tr style={{ backgroundColor: "#f6f6f7" }}>
+                              <th style={{ padding: "8px 12px", textAlign: "left", fontWeight: 600, color: "#637381", fontSize: "11px", textTransform: "uppercase" }}>Product</th>
+                              <th style={{ padding: "8px 12px", textAlign: "left", fontWeight: 600, color: "#637381", fontSize: "11px", textTransform: "uppercase" }}>Variant</th>
+                              <th style={{ padding: "8px 12px", textAlign: "right", fontWeight: 600, color: "#637381", fontSize: "11px", textTransform: "uppercase" }}>Old</th>
+                              <th style={{ padding: "8px 12px", textAlign: "right", fontWeight: 600, color: "#637381", fontSize: "11px", textTransform: "uppercase" }}>New</th>
+                              <th style={{ padding: "8px 12px", textAlign: "right", fontWeight: 600, color: "#637381", fontSize: "11px", textTransform: "uppercase" }}>Change</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {run.entries.map((entry) => {
+                              const oldPrice = parseFloat(entry.oldPrice);
+                              const newPrice = parseFloat(entry.newPrice);
+                              const diff = newPrice - oldPrice;
+                              const pctChange = oldPrice > 0 ? ((diff / oldPrice) * 100).toFixed(1) : "N/A";
+                              return (
+                                <tr key={entry.id} style={{ borderBottom: "1px solid #f1f2f3" }}>
+                                  <td style={{ padding: "8px 12px", fontWeight: 600, maxWidth: "150px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={entry.productTitle}>
+                                    {entry.productTitle}
+                                  </td>
+                                  <td style={{ padding: "8px 12px", color: "#637381" }}>
+                                    {entry.variantTitle || "Default"}
+                                  </td>
+                                  <td style={{ padding: "8px 12px", textAlign: "right" }}>{formatPrice(entry.oldPrice)}</td>
+                                  <td style={{ padding: "8px 12px", textAlign: "right", fontWeight: 600 }}>{formatPrice(entry.newPrice)}</td>
+                                  <td style={{ padding: "8px 12px", textAlign: "right", color: diff < 0 ? "#d72c0d" : diff > 0 ? "#1a7f37" : "#637381", fontWeight: 600 }}>
+                                    {formatDiff(diff)} ({pctChange}%)
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </s-section>
       )}
 
+      {/* Pagination */}
       {totalPages > 1 && (
         <s-section>
-          <s-stack direction="inline" gap="base" align="center">
-            <s-button
-              variant="secondary"
+          <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
+            <button
+              onClick={handlePrevPage}
               disabled={page <= 1}
-              onClick={() => {
-                const params = new URLSearchParams();
-                params.set("page", String(page - 1));
-                if (search) params.set("search", search);
-                if (source) params.set("source", source);
-                navigate(`/app/history?${params.toString()}`);
-              }}
+              style={{ padding: "8px 16px", borderRadius: "8px", border: "1px solid #c4cdd5", backgroundColor: "white", cursor: page <= 1 ? "default" : "pointer", fontSize: "14px", opacity: page <= 1 ? 0.5 : 1 }}
             >
               ← Previous
-            </s-button>
-            <s-text>
+            </button>
+            <span style={{ fontSize: "14px", color: "#637381" }}>
               Page {page} of {totalPages}
-            </s-text>
-            <s-button
-              variant="secondary"
+            </span>
+            <button
+              onClick={handleNextPage}
               disabled={page >= totalPages}
-              onClick={() => {
-                const params = new URLSearchParams();
-                params.set("page", String(page + 1));
-                if (search) params.set("search", search);
-                if (source) params.set("source", source);
-                navigate(`/app/history?${params.toString()}`);
-              }}
+              style={{ padding: "8px 16px", borderRadius: "8px", border: "1px solid #c4cdd5", backgroundColor: "white", cursor: page >= totalPages ? "default" : "pointer", fontSize: "14px", opacity: page >= totalPages ? 0.5 : 1 }}
             >
               Next →
-            </s-button>
-          </s-stack>
+            </button>
+          </div>
         </s-section>
       )}
 

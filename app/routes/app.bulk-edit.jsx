@@ -7,6 +7,10 @@ import prisma from "../db.server";
 
 export const loader = async ({ request }) => {
   const { admin, session } = await authenticate.admin(request);
+  const url = new URL(request.url);
+  const cursor = url.searchParams.get("cursor") || null;
+  const loadAll = url.searchParams.get("loadAll") === "true";
+  const PAGE_SIZE = loadAll ? 250 : 50;
 
   // Product query WITH weight (requires read_inventory scope)
   const PRODUCTS_QUERY_WITH_WEIGHT = `#graphql
@@ -51,35 +55,38 @@ export const loader = async ({ request }) => {
       }
     }`;
 
-  // Paginate through ALL products, fallback to no-weight query if scope missing
+  // Load products — either first page or all (for loadAll mode)
   let allProducts = [];
   let hasNextPage = true;
-  let cursor = null;
+  let endCursor = cursor;
   let useWeightQuery = true;
-  while (hasNextPage) {
+  let pagesLoaded = 0;
+  const maxPages = loadAll ? 100 : 1; // 1 page for initial load, all for loadAll
+
+  while (hasNextPage && pagesLoaded < maxPages) {
     try {
       const response = await admin.graphql(
         useWeightQuery ? PRODUCTS_QUERY_WITH_WEIGHT : PRODUCTS_QUERY_NO_WEIGHT,
-        { variables: { first: 250, after: cursor } }
+        { variables: { first: PAGE_SIZE, after: endCursor } }
       );
       const data = await response.json();
-      // Check for GraphQL errors (e.g., scope issues)
       if (data.errors && data.errors.length > 0 && useWeightQuery) {
         console.warn("Weight query failed, falling back to no-weight query:", data.errors[0]?.message);
         useWeightQuery = false;
-        continue; // retry this page with fallback query
+        continue;
       }
       const edges = data.data?.products?.edges || [];
       allProducts = allProducts.concat(edges.map((e) => e.node));
       hasNextPage = data.data?.products?.pageInfo?.hasNextPage || false;
-      cursor = data.data?.products?.pageInfo?.endCursor || null;
+      endCursor = data.data?.products?.pageInfo?.endCursor || null;
+      pagesLoaded++;
     } catch (err) {
       if (useWeightQuery) {
         console.warn("Weight query threw error, falling back to no-weight query:", err.message);
         useWeightQuery = false;
-        continue; // retry this page with fallback query
+        continue;
       }
-      throw err; // re-throw if fallback also fails
+      throw err;
     }
   }
   const products = allProducts;
@@ -105,6 +112,13 @@ export const loader = async ({ request }) => {
     take: 5,
   });
 
+  // Get total product count
+  const countResponse = await admin.graphql(`#graphql
+    query { productsCount { count } }
+  `);
+  const countData = await countResponse.json();
+  const totalProductCount = countData.data?.productsCount?.count || products.length;
+
   let shopPlan = await prisma.shopPlan.findUnique({ where: { shop: session.shop } });
   if (!shopPlan) {
     shopPlan = await prisma.shopPlan.create({ data: { shop: session.shop } });
@@ -129,6 +143,7 @@ export const loader = async ({ request }) => {
     products, vendors, productTypes, allTags, collections,
     shop: session.shop, recentEdits,
     currentPlan: plan, monthlyEdits, productsPerEdit,
+    hasNextPage, endCursor, totalProductCount,
   };
 };
 
@@ -593,11 +608,11 @@ const QUICK_PRESETS = [
 
 const styles = {
   stepIndicator: (active, completed, enabled) => ({
-    display: "flex", alignItems: "center", gap: "8px", padding: "10px 20px", borderRadius: "24px", border: "none",
+    display: "flex", alignItems: "center", gap: "6px", padding: "8px 12px", borderRadius: "24px", border: "none",
     cursor: enabled ? "pointer" : "default", fontWeight: active ? "700" : "500",
     backgroundColor: active ? "#2c6ecb" : completed ? "#e3f1df" : "transparent",
     color: active ? "white" : completed ? "#1a7f37" : enabled ? "#202223" : "#babec3",
-    fontSize: "14px", transition: "all 0.2s ease", opacity: enabled ? 1 : 0.5,
+    fontSize: "13px", transition: "all 0.2s ease", opacity: enabled ? 1 : 0.5,
   }),
   stepNumber: (active, completed) => ({
     display: "inline-flex", alignItems: "center", justifyContent: "center", width: "24px", height: "24px",
@@ -620,7 +635,7 @@ const styles = {
   }),
   card: { border: "1px solid #e1e3e5", borderRadius: "12px", padding: "16px", marginBottom: "12px", backgroundColor: "white" },
   productRow: (selected) => ({
-    display: "flex", alignItems: "center", gap: "12px", padding: "10px 16px", borderBottom: "1px solid #f1f2f3",
+    display: "flex", alignItems: "center", gap: "10px", padding: "10px 12px", borderBottom: "1px solid #f1f2f3",
     cursor: "pointer", backgroundColor: selected ? "#f0f5ff" : "transparent", transition: "background-color 0.1s",
   }),
   presetBtn: (active) => ({
@@ -637,7 +652,7 @@ const styles = {
     backgroundColor: tone === "success" ? "#e3f1df" : tone === "critical" ? "#fef3f2" : tone === "warning" ? "#fef8e8" : "#e4e5e7",
     color: tone === "success" ? "#1a7f37" : tone === "critical" ? "#d72c0d" : tone === "warning" ? "#916a00" : "#637381",
   }),
-  filterRule: { display: "flex", gap: "8px", alignItems: "center", padding: "8px 12px", backgroundColor: "#f9fafb", borderRadius: "8px", marginBottom: "6px", border: "1px solid #e1e3e5", flexWrap: "wrap" },
+  filterRule: { display: "flex", gap: "6px", alignItems: "center", padding: "8px 10px", backgroundColor: "#f9fafb", borderRadius: "8px", marginBottom: "6px", border: "1px solid #e1e3e5", flexWrap: "wrap" },
 };
 
 /* ═══════════════════════════════════════════════════════════════
@@ -645,10 +660,20 @@ const styles = {
    ═══════════════════════════════════════════════════════════════ */
 
 export default function BulkEdit() {
-  const { products, vendors, productTypes, allTags, collections, shop, recentEdits, currentPlan, monthlyEdits, productsPerEdit } = useLoaderData();
+  const loaderData = useLoaderData();
   const fetcher = useFetcher();
+  const loadMoreFetcher = useFetcher();
   const navigate = useNavigate();
   const shopify = useAppBridge();
+
+  const { vendors, productTypes, allTags, collections, shop, recentEdits, currentPlan, monthlyEdits, productsPerEdit, totalProductCount } = loaderData;
+
+  // Paginated product state
+  const [allProducts, setAllProducts] = useState(loaderData.products);
+  const [hasMore, setHasMore] = useState(loaderData.hasNextPage);
+  const [nextCursor, setNextCursor] = useState(loaderData.endCursor);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const products = allProducts;
 
   const [step, setStep] = useState(1);
 
@@ -666,6 +691,57 @@ export default function BulkEdit() {
   const [lastChanges, setLastChanges] = useState(null);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
   const [networkError, setNetworkError] = useState(null);
+
+  // Load all remaining products
+  const loadAllProducts = () => {
+    if (!hasMore || isLoadingMore) return;
+    setIsLoadingMore(true);
+    loadMoreFetcher.load(`/app/bulk-edit?loadAll=true&cursor=${nextCursor || ""}`);
+  };
+
+  // Handle load more response
+  useEffect(() => {
+    if (loadMoreFetcher.data && loadMoreFetcher.state === "idle") {
+      const newProducts = loadMoreFetcher.data.products || [];
+      setAllProducts(prev => {
+        const existingIds = new Set(prev.map(p => p.id));
+        const unique = newProducts.filter(p => !existingIds.has(p.id));
+        return [...prev, ...unique];
+      });
+      setHasMore(loadMoreFetcher.data.hasNextPage || false);
+      setNextCursor(loadMoreFetcher.data.endCursor || null);
+      setIsLoadingMore(false);
+    }
+  }, [loadMoreFetcher.data, loadMoreFetcher.state]);
+
+  // Clone support: check URL for clone parameter
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const cloneId = params.get("clone");
+    if (cloneId && recentEdits) {
+      const editToClone = recentEdits.find(e => e.id === cloneId);
+      if (editToClone && editToClone.changes) {
+        try {
+          const changes = JSON.parse(editToClone.changes);
+          // Extract unique modifications from the changes
+          const modMap = new Map();
+          for (const c of changes) {
+            const key = `${c.field}-${c.modificationType}`;
+            if (!modMap.has(key)) {
+              modMap.set(key, { id: Date.now() + modMap.size, field: c.field, type: c.modificationType || "exact", value: "", value2: "", rounding: "none" });
+            }
+          }
+          if (modMap.size > 0) {
+            setModifications([...modMap.values()]);
+            setEditName(`${editToClone.name} (copy)`);
+            shopify.toast.show(`Cloned "${editToClone.name}" — select products and configure values`);
+          }
+        } catch (e) {
+          console.warn("Failed to parse clone data:", e);
+        }
+      }
+    }
+  }, []);
 
   // ── Filter rule management ──
   const addFilterRule = () => {
@@ -1077,13 +1153,13 @@ export default function BulkEdit() {
 
       {/* Step indicator */}
       <s-box padding="base">
-        <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: "8px" }}>
+        <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: "4px", flexWrap: "wrap" }}>
           {[
-            { num: 1, label: "Select Products" },
+            { num: 1, label: "Select\nProducts" },
             { num: 2, label: "Configure" },
-            { num: 3, label: "Review & Execute" },
+            { num: 3, label: "Review &\nExecute" },
           ].map((s, i) => (
-            <div key={s.num} style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <div key={s.num} style={{ display: "flex", alignItems: "center", gap: "4px" }}>
               <button
                 style={styles.stepIndicator(step === s.num, step > s.num, step >= s.num)}
                 onClick={() => { if (step > s.num) setStep(s.num); }}
@@ -1091,9 +1167,9 @@ export default function BulkEdit() {
                 <span style={styles.stepNumber(step === s.num, step > s.num)}>
                   {step > s.num ? "✓" : s.num}
                 </span>
-                {s.label}
+                <span style={{ whiteSpace: "nowrap" }}>{s.label.replace("\n", " ")}</span>
               </button>
-              {i < 2 && <span style={{ color: "#babec3", fontSize: "18px" }}>›</span>}
+              {i < 2 && <span style={{ color: "#babec3", fontSize: "16px" }}>›</span>}
             </div>
           ))}
         </div>
@@ -1174,6 +1250,24 @@ export default function BulkEdit() {
             </div>
           </s-box>
 
+          {/* Load all products button */}
+          {hasMore && (
+            <s-box padding="base">
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", backgroundColor: "#f0f5ff", borderRadius: "10px", border: "1px solid #c4d7f2" }}>
+                <span style={{ fontSize: "13px", color: "#1a3a6b" }}>
+                  Showing {products.length} of {totalProductCount} products
+                </span>
+                <button
+                  onClick={loadAllProducts}
+                  disabled={isLoadingMore}
+                  style={{ ...styles.primaryBtn(!isLoadingMore), padding: "8px 16px", fontSize: "13px" }}
+                >
+                  {isLoadingMore ? "Loading..." : `Load All ${totalProductCount} Products`}
+                </button>
+              </div>
+            </s-box>
+          )}
+
           {/* Product list */}
           <div style={{ maxHeight: "520px", overflowY: "auto", border: "1px solid #e1e3e5", borderRadius: "10px" }}>
             {filtered.map((product) => {
@@ -1192,16 +1286,15 @@ export default function BulkEdit() {
                   ) : (
                     <div style={{ width: "44px", height: "44px", borderRadius: "8px", backgroundColor: "#f1f2f3", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "18px", color: "#babec3" }}>📦</div>
                   )}
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontWeight: 600, fontSize: "14px", color: "#202223", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{product.title}</div>
-                    <div style={{ fontSize: "12px", color: "#637381", display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "2px" }}>
+                  <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
+                    <div style={{ fontWeight: 600, fontSize: "13px", color: "#202223", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{product.title}</div>
+                    <div style={{ fontSize: "11px", color: "#637381", display: "flex", gap: "6px", flexWrap: "wrap", marginTop: "2px" }}>
                       <span>{vc} variant{vc !== 1 ? "s" : ""}</span>
                       {product.vendor && <span>· {product.vendor}</span>}
-                      {product.productType && <span>· {product.productType}</span>}
                     </div>
                   </div>
-                  <div style={{ textAlign: "right", flexShrink: 0 }}>
-                    <div style={{ fontWeight: 600, fontSize: "14px", color: "#202223" }}>{priceDisplay}</div>
+                  <div style={{ textAlign: "right", flexShrink: 0, minWidth: "70px" }}>
+                    <div style={{ fontWeight: 600, fontSize: "13px", color: "#202223", whiteSpace: "nowrap" }}>{priceDisplay}</div>
                     <span style={styles.badge(product.status === "ACTIVE" ? "success" : product.status === "DRAFT" ? "warning" : "default")}>
                       {product.status.charAt(0) + product.status.slice(1).toLowerCase()}
                     </span>
