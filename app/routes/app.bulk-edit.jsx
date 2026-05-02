@@ -93,7 +93,31 @@ export const loader = async ({ request }) => {
 
   const vendors = [...new Set(products.map((p) => p.vendor).filter(Boolean))].sort();
   const productTypes = [...new Set(products.map((p) => p.productType).filter(Boolean))].sort();
-  const allTags = [...new Set(products.flatMap((p) => p.tags || []))].sort();
+
+  // Fetch ALL tags from the store (not just from loaded products)
+  let allTags = [];
+  try {
+    let tagCursor = null;
+    let hasMoreTags = true;
+    while (hasMoreTags) {
+      const tagResp = await admin.graphql(`#graphql
+        query ($first: Int!, $after: String) {
+          productTags(first: 250, after: $after) {
+            edges { node }
+            pageInfo { hasNextPage endCursor }
+          }
+        }`, { variables: { first: 250, after: tagCursor } });
+      const tagData = await tagResp.json();
+      const tagEdges = tagData.data?.productTags?.edges || [];
+      allTags = allTags.concat(tagEdges.map(e => e.node));
+      hasMoreTags = tagData.data?.productTags?.pageInfo?.hasNextPage || false;
+      tagCursor = tagData.data?.productTags?.pageInfo?.endCursor || null;
+    }
+  } catch (tagErr) {
+    console.warn("[BulkEdit] Failed to fetch all tags, falling back to product tags:", tagErr.message);
+    allTags = [...new Set(products.flatMap((p) => p.tags || []))];
+  }
+  allTags = [...new Set(allTags)].sort();
 
   const collectionResponse = await admin.graphql(
     `#graphql
@@ -355,6 +379,82 @@ export const action = async ({ request }) => {
     }
 
     return { success: true, successCount, errorCount, errors, totalProducts: Object.keys(changesByProduct).length, partialWarning: errorCount > 0 };
+  }
+
+  if (intent === "search_products") {
+    // Server-side product search using Shopify's query parameter
+    const searchQuery = formData.get("query") || "";
+    const SEARCH_QUERY_WITH_WEIGHT = `#graphql
+      query ($first: Int!, $after: String, $query: String) {
+        products(first: $first, after: $after, query: $query) {
+          pageInfo { hasNextPage endCursor }
+          edges {
+            node {
+              id title handle status productType vendor tags
+              featuredMedia { preview { image { url altText } } }
+              variants(first: 100) {
+                edges {
+                  node {
+                    id title price compareAtPrice sku barcode inventoryQuantity
+                    inventoryItem { measurement { weight { value unit } } }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }`;
+    const SEARCH_QUERY_NO_WEIGHT = `#graphql
+      query ($first: Int!, $after: String, $query: String) {
+        products(first: $first, after: $after, query: $query) {
+          pageInfo { hasNextPage endCursor }
+          edges {
+            node {
+              id title handle status productType vendor tags
+              featuredMedia { preview { image { url altText } } }
+              variants(first: 100) {
+                edges {
+                  node {
+                    id title price compareAtPrice sku barcode inventoryQuantity
+                  }
+                }
+              }
+            }
+          }
+        }
+      }`;
+
+    let searchProducts = [];
+    let hasNextPage = true;
+    let endCursor = null;
+    let useWeight = true;
+    let pages = 0;
+    const maxPages = 10; // up to 2500 products
+
+    while (hasNextPage && pages < maxPages) {
+      try {
+        const resp = await admin.graphql(
+          useWeight ? SEARCH_QUERY_WITH_WEIGHT : SEARCH_QUERY_NO_WEIGHT,
+          { variables: { first: 250, after: endCursor, query: searchQuery || null } }
+        );
+        const d = await resp.json();
+        if (d.errors && d.errors.length > 0 && useWeight) {
+          useWeight = false;
+          continue;
+        }
+        const edges = d.data?.products?.edges || [];
+        searchProducts = searchProducts.concat(edges.map(e => e.node));
+        hasNextPage = d.data?.products?.pageInfo?.hasNextPage || false;
+        endCursor = d.data?.products?.pageInfo?.endCursor || null;
+        pages++;
+      } catch (err) {
+        if (useWeight) { useWeight = false; continue; }
+        console.error("[BulkEdit] Search error:", err.message);
+        break;
+      }
+    }
+
+    return { success: true, intent: "search_products", products: searchProducts, totalFound: searchProducts.length };
   }
 
   if (intent === "revert") {
@@ -680,6 +780,11 @@ export default function BulkEdit() {
   // Step 1 state
   const [filterRules, setFilterRules] = useState([]);
   const [selectedIds, setSelectedIds] = useState(new Set());
+  const [isSearching, setIsSearching] = useState(false);
+  const [serverFilteredProducts, setServerFilteredProducts] = useState(null);
+  const searchFetcher = useFetcher();
+  const [tagSuggestions, setTagSuggestions] = useState([]);
+  const [showTagSuggestions, setShowTagSuggestions] = useState(null); // rule id
 
   // Step 2 state
   const [editName, setEditName] = useState("");
@@ -713,6 +818,100 @@ export default function BulkEdit() {
       setIsLoadingMore(false);
     }
   }, [loadMoreFetcher.data, loadMoreFetcher.state]);
+
+  // Handle server-side search response
+  useEffect(() => {
+    if (searchFetcher.data && searchFetcher.state === "idle" && searchFetcher.data.intent === "search_products") {
+      setServerFilteredProducts(searchFetcher.data.products || []);
+      setIsSearching(false);
+    }
+  }, [searchFetcher.data, searchFetcher.state]);
+
+  // Build Shopify query string from filter rules and trigger server-side search
+  const buildShopifyQuery = useCallback((rules) => {
+    const parts = [];
+    for (const rule of rules) {
+      if (!rule.value && !["is_empty", "is_not_empty"].includes(rule.operator)) continue;
+      const val = rule.value || "";
+      switch (rule.field) {
+        case "tags":
+          if (rule.operator === "contains" || rule.operator === "equals") parts.push(`tag:${val}`);
+          else if (rule.operator === "not_contains" || rule.operator === "not_equals") parts.push(`-tag:${val}`);
+          break;
+        case "title":
+          if (rule.operator === "contains" || rule.operator === "equals") parts.push(`title:*${val}*`);
+          else if (rule.operator === "not_contains") parts.push(`-title:*${val}*`);
+          break;
+        case "vendor":
+          if (rule.operator === "contains" || rule.operator === "equals") parts.push(`vendor:${val}`);
+          else if (rule.operator === "not_equals") parts.push(`-vendor:${val}`);
+          break;
+        case "productType":
+          if (rule.operator === "contains" || rule.operator === "equals") parts.push(`product_type:${val}`);
+          else if (rule.operator === "not_equals") parts.push(`-product_type:${val}`);
+          break;
+        case "status":
+          if (rule.operator === "equals") parts.push(`status:${val.toLowerCase()}`);
+          else if (rule.operator === "not_equals") parts.push(`-status:${val.toLowerCase()}`);
+          break;
+        case "sku":
+          if (rule.operator === "contains" || rule.operator === "equals") parts.push(`sku:${val}`);
+          break;
+        case "price":
+          if (rule.operator === "equals") parts.push(`variants.price:${val}`);
+          else if (rule.operator === "greater_than") parts.push(`variants.price:>${val}`);
+          else if (rule.operator === "less_than") parts.push(`variants.price:<${val}`);
+          else if (rule.operator === "greater_or_equal") parts.push(`variants.price:>=${val}`);
+          else if (rule.operator === "less_or_equal") parts.push(`variants.price:<=${val}`);
+          break;
+        case "inventoryQuantity":
+          if (rule.operator === "equals") parts.push(`inventory_total:${val}`);
+          else if (rule.operator === "greater_than") parts.push(`inventory_total:>${val}`);
+          else if (rule.operator === "less_than") parts.push(`inventory_total:<${val}`);
+          break;
+        default:
+          // For fields without direct Shopify query support, fall back to client-side
+          break;
+      }
+    }
+    return parts.join(" AND ");
+  }, []);
+
+  // Trigger server-side search when filter rules change (debounced)
+  useEffect(() => {
+    if (filterRules.length === 0) {
+      setServerFilteredProducts(null);
+      setIsSearching(false);
+      return;
+    }
+    // Only search if all rules have values (or are empty/not-empty operators)
+    const allValid = filterRules.every(r => r.value || ["is_empty", "is_not_empty"].includes(r.operator));
+    if (!allValid) return;
+
+    const query = buildShopifyQuery(filterRules);
+    if (query) {
+      setIsSearching(true);
+      const timer = setTimeout(() => {
+        searchFetcher.submit(
+          { intent: "search_products", query },
+          { method: "POST" }
+        );
+      }, 500); // 500ms debounce
+      return () => clearTimeout(timer);
+    } else {
+      // If we can't build a Shopify query (unsupported field combos), fall back to client-side
+      setServerFilteredProducts(null);
+      setIsSearching(false);
+    }
+  }, [filterRules]);
+
+  // Update tag suggestions when typing in a tag filter
+  const updateTagSuggestions = useCallback((value) => {
+    if (!value) { setTagSuggestions([]); return; }
+    const lower = value.toLowerCase();
+    const matches = allTags.filter(t => t.toLowerCase().includes(lower)).slice(0, 10);
+    setTagSuggestions(matches);
+  }, [allTags]);
 
   // Clone support: check URL for clone parameter
   useEffect(() => {
@@ -769,17 +968,37 @@ export default function BulkEdit() {
   };
 
   const removeFilterRule = (id) => setFilterRules((prev) => prev.filter((r) => r.id !== id));
-  const clearAllFilters = () => setFilterRules([]);
+  const clearAllFilters = () => {
+    setFilterRules([]);
+    setServerFilteredProducts(null);
+    setIsSearching(false);
+    setTagSuggestions([]);
+    setShowTagSuggestions(null);
+  };
 
-  // Filtered products
+  // Filtered products — use server results when available, otherwise client-side
   const filtered = useMemo(() => {
+    if (serverFilteredProducts !== null) {
+      // Server-side results already filtered, but apply any client-only filters
+      const clientOnlyRules = filterRules.filter(r => {
+        return ["variantTitle", "compareAtPrice", "weight", "templateSuffix"].includes(r.field) ||
+          ["is_empty", "is_not_empty", "starts_with", "ends_with", "between"].includes(r.operator);
+      });
+      if (clientOnlyRules.length === 0) return serverFilteredProducts;
+      return serverFilteredProducts.filter(p => {
+        for (const rule of clientOnlyRules) {
+          if (!evaluateFilter(p, rule)) return false;
+        }
+        return true;
+      });
+    }
     return products.filter((p) => {
       for (const rule of filterRules) {
         if (!evaluateFilter(p, rule)) return false;
       }
       return true;
     });
-  }, [products, filterRules]);
+  }, [products, filterRules, serverFilteredProducts]);
 
   const selected = useMemo(() => filtered.filter((p) => selectedIds.has(p.id)), [filtered, selectedIds]);
   const totalVariants = useMemo(() => selected.reduce((s, p) => s + (p.variants?.edges?.length || 0), 0), [selected]);
@@ -1213,7 +1432,48 @@ export default function BulkEdit() {
                         {fieldOptions.map(o => <option key={o} value={o}>{o}</option>)}
                       </select>
                     ) : (
-                      <input type={fieldType === "number" ? "number" : "text"} placeholder="Value..." value={rule.value} onChange={(e) => updateFilterRule(rule.id, "value", e.target.value)} style={{ ...styles.input, width: "auto", minWidth: "120px" }} />
+                      <div style={{ position: "relative" }}>
+                        <input
+                          type={fieldType === "number" ? "number" : "text"}
+                          placeholder={rule.field === "tags" ? "Type a tag..." : "Value..."}
+                          value={rule.value}
+                          onChange={(e) => {
+                            updateFilterRule(rule.id, "value", e.target.value);
+                            if (rule.field === "tags") {
+                              updateTagSuggestions(e.target.value);
+                              setShowTagSuggestions(rule.id);
+                            }
+                          }}
+                          onFocus={() => {
+                            if (rule.field === "tags") {
+                              updateTagSuggestions(rule.value);
+                              setShowTagSuggestions(rule.id);
+                            }
+                          }}
+                          onBlur={() => setTimeout(() => setShowTagSuggestions(null), 200)}
+                          style={{ ...styles.input, width: "auto", minWidth: "120px" }}
+                        />
+                        {rule.field === "tags" && showTagSuggestions === rule.id && tagSuggestions.length > 0 && (
+                          <div style={{ position: "absolute", top: "100%", left: 0, right: 0, zIndex: 100, backgroundColor: "white", border: "1px solid #c4cdd5", borderRadius: "8px", boxShadow: "0 4px 12px rgba(0,0,0,0.15)", maxHeight: "180px", overflowY: "auto", marginTop: "2px" }}>
+                            {tagSuggestions.map(tag => (
+                              <div
+                                key={tag}
+                                onMouseDown={(e) => {
+                                  e.preventDefault();
+                                  updateFilterRule(rule.id, "value", tag);
+                                  setShowTagSuggestions(null);
+                                  setTagSuggestions([]);
+                                }}
+                                style={{ padding: "8px 12px", cursor: "pointer", fontSize: "13px", color: "#202223", borderBottom: "1px solid #f1f2f3" }}
+                                onMouseEnter={(e) => e.target.style.backgroundColor = "#f0f5ff"}
+                                onMouseLeave={(e) => e.target.style.backgroundColor = "white"}
+                              >
+                                {tag}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     )
                   )}
                   {rule.operator === "between" && (
@@ -1228,8 +1488,12 @@ export default function BulkEdit() {
             })}
 
             {filterRules.length > 0 && (
-              <div style={{ fontSize: "12px", color: "#637381", marginTop: "6px" }}>
-                {filterRules.length} filter{filterRules.length !== 1 ? "s" : ""} active — showing {filtered.length} of {products.length} products
+              <div style={{ fontSize: "12px", color: "#637381", marginTop: "6px", display: "flex", alignItems: "center", gap: "6px" }}>
+                {isSearching ? (
+                  <><span style={{ display: "inline-block", width: "12px", height: "12px", border: "2px solid #2c6ecb", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 0.8s linear infinite" }} /> Searching across all products...</>
+                ) : (
+                  <>{filterRules.length} filter{filterRules.length !== 1 ? "s" : ""} active — showing {filtered.length} {serverFilteredProducts !== null ? "matching" : `of ${products.length}`} products</>
+                )}
               </div>
             )}
           </s-box>
@@ -1250,8 +1514,8 @@ export default function BulkEdit() {
             </div>
           </s-box>
 
-          {/* Load all products button */}
-          {hasMore && (
+          {/* Load all products button — hide when server-side filters are active */}
+          {hasMore && serverFilteredProducts === null && (
             <s-box padding="base">
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", backgroundColor: "#f0f5ff", borderRadius: "10px", border: "1px solid #c4d7f2" }}>
                 <span style={{ fontSize: "13px", color: "#1a3a6b" }}>
