@@ -381,6 +381,136 @@ export const action = async ({ request }) => {
     return { success: true, successCount, errorCount, errors, totalProducts: Object.keys(changesByProduct).length, partialWarning: errorCount > 0 };
   }
 
+  if (intent === "execute_batch") {
+    // Process a batch of changes (subset of products) for progress tracking
+    const changesRaw = formData.get("changes");
+    const editName = formData.get("editName") || "Bulk Edit";
+    const isLastBatch = formData.get("isLastBatch") === "true";
+    const allChangesRaw = formData.get("allChanges") || "[]";
+    const changes = JSON.parse(changesRaw);
+    const allChanges = JSON.parse(allChangesRaw);
+
+    let successCount = 0;
+    let errorCount = 0;
+    const errors = [];
+    const historyRecords = [];
+
+    // Group changes by product
+    const changesByProduct = {};
+    for (const change of changes) {
+      if (!changesByProduct[change.productId]) changesByProduct[change.productId] = [];
+      changesByProduct[change.productId].push(change);
+    }
+
+    for (const [productId, productChanges] of Object.entries(changesByProduct)) {
+      try {
+        const productLevelChanges = productChanges.filter(c => ["title", "vendor", "productType", "status", "tags", "templateSuffix"].includes(c.field));
+        const variantLevelChanges = productChanges.filter(c => ["price", "compareAtPrice", "sku", "barcode", "weight", "taxable"].includes(c.field));
+
+        if (productLevelChanges.length > 0) {
+          const productInput = {};
+          for (const change of productLevelChanges) {
+            if (change.field === "title") productInput.title = change.newValue;
+            else if (change.field === "vendor") productInput.vendor = change.newValue;
+            else if (change.field === "productType") productInput.productType = change.newValue;
+            else if (change.field === "status") productInput.status = change.newValue;
+            else if (change.field === "tags") productInput.tags = change.newValue.split(",").map(t => t.trim()).filter(Boolean);
+            else if (change.field === "templateSuffix") productInput.templateSuffix = change.newValue;
+          }
+          const result = await admin.graphql(`#graphql
+            mutation productUpdate($input: ProductInput!) {
+              productUpdate(input: $input) {
+                product { id }
+                userErrors { field message }
+              }
+            }`, { variables: { input: { id: productId, ...productInput } } });
+          const resultData = await result.json();
+          const userErrors = resultData.data?.productUpdate?.userErrors || [];
+          if (userErrors.length > 0) {
+            errorCount += productLevelChanges.length;
+            errors.push({ product: productChanges[0]?.productTitle, errors: userErrors.map(e => e.message) });
+          } else {
+            successCount += productLevelChanges.length;
+            for (const change of productLevelChanges) {
+              historyRecords.push({ shop: session.shop, productId: change.productId, variantId: change.variantId || productId, productTitle: change.productTitle, variantTitle: change.variantTitle || null, oldPrice: change.oldValue, newPrice: change.newValue, changeType: change.field, changeSource: "bulk_edit" });
+            }
+          }
+        }
+
+        if (variantLevelChanges.length > 0) {
+          const variantMap = {};
+          for (const change of variantLevelChanges) {
+            if (!variantMap[change.variantId]) variantMap[change.variantId] = { id: change.variantId };
+            const v = variantMap[change.variantId];
+            if (change.field === "price") v.price = change.newValue;
+            else if (change.field === "compareAtPrice") v.compareAtPrice = change.newValue;
+            else if (change.field === "sku") v.sku = change.newValue;
+            else if (change.field === "barcode") v.barcode = change.newValue;
+            else if (change.field === "weight") {
+              v.inventoryItem = v.inventoryItem || {};
+              v.inventoryItem.measurement = v.inventoryItem.measurement || {};
+              v.inventoryItem.measurement.weight = { value: parseFloat(change.newValue), unit: "POUNDS" };
+            }
+          }
+          const variants = Object.values(variantMap);
+          const result = await admin.graphql(`#graphql
+            mutation productVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
+              productVariantsBulkUpdate(productId: $productId, variants: $variants) {
+                product { id }
+                productVariants { id }
+                userErrors { field message }
+              }
+            }`, { variables: { productId, variants } });
+          const resultData = await result.json();
+          const userErrors = resultData.data?.productVariantsBulkUpdate?.userErrors || [];
+          if (userErrors.length > 0) {
+            errorCount += variantLevelChanges.length;
+            errors.push({ product: productChanges[0]?.productTitle, errors: userErrors.map(e => e.message) });
+          } else {
+            successCount += variantLevelChanges.length;
+            for (const change of variantLevelChanges) {
+              historyRecords.push({ shop: session.shop, productId: change.productId, variantId: change.variantId, productTitle: change.productTitle, variantTitle: change.variantTitle || null, oldPrice: change.oldValue, newPrice: change.newValue, changeType: change.field, changeSource: "bulk_edit" });
+            }
+          }
+        }
+      } catch (err) {
+        errorCount += productChanges.length;
+        errors.push({ product: productChanges[0]?.productTitle, errors: [err.message || "Unknown error"] });
+      }
+    }
+
+    // Save to DB only on last batch (or if single batch)
+    if (isLastBatch) {
+      try {
+        const bulkEditRecord = await prisma.bulkEdit.create({
+          data: {
+            shop: session.shop,
+            name: editName,
+            status: "completed",
+            productCount: successCount,
+            changes: JSON.stringify((allChanges.length > 0 ? allChanges : changes).slice(0, 50)),
+          },
+        });
+        const enrichedHistoryRecords = historyRecords.map(record => ({ ...record, bulkEditId: bulkEditRecord.id, bulkEditName: editName }));
+        if (enrichedHistoryRecords.length > 0) {
+          await prisma.priceHistory.createMany({ data: enrichedHistoryRecords });
+        }
+        await prisma.shopPlan.update({ where: { shop: session.shop }, data: { monthlyEdits: { increment: 1 } } });
+      } catch (dbErr) {
+        console.error("[BulkEdit] Database save error:", dbErr.message);
+      }
+    } else if (historyRecords.length > 0) {
+      // Save history records for intermediate batches too
+      try {
+        await prisma.priceHistory.createMany({ data: historyRecords.map(r => ({ ...r, bulkEditName: editName })) });
+      } catch (dbErr) {
+        console.error("[BulkEdit] Intermediate history save error:", dbErr.message);
+      }
+    }
+
+    return { success: true, successCount, errorCount, errors };
+  }
+
   if (intent === "search_products") {
     // Server-side product search using Shopify's query parameter
     const searchQuery = formData.get("query") || "";
@@ -796,6 +926,8 @@ export default function BulkEdit() {
   const [lastChanges, setLastChanges] = useState(null);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
   const [networkError, setNetworkError] = useState(null);
+  // Progress tracking
+  const [executionProgress, setExecutionProgress] = useState(null); // { completed, total, currentProduct, errors }
 
   // Load all remaining products
   const loadAllProducts = () => {
@@ -1223,7 +1355,7 @@ export default function BulkEdit() {
   // ── Execution ──
   const handleExecute = () => setShowConfirmDialog(true);
 
-  const confirmExecute = () => {
+  const confirmExecute = async () => {
     setShowConfirmDialog(false);
     // Build changes fresh
     const changesToSubmit = [];
@@ -1252,10 +1384,70 @@ export default function BulkEdit() {
     }
     if (changesToSubmit.length === 0) { shopify.toast.show("No changes to apply"); return; }
     setLastChanges(changesToSubmit);
-    fetcher.submit(
-      { intent: "execute", changes: JSON.stringify(changesToSubmit), editName: editName || "Bulk Edit" },
-      { method: "POST" }
-    );
+
+    // Group changes by product for batch execution with progress
+    const changesByProduct = {};
+    for (const c of changesToSubmit) {
+      if (!changesByProduct[c.productId]) changesByProduct[c.productId] = { title: c.productTitle, changes: [] };
+      changesByProduct[c.productId].changes.push(c);
+    }
+    const productBatches = Object.entries(changesByProduct);
+    const totalProducts = productBatches.length;
+
+    setExecutionProgress({ completed: 0, total: totalProducts, currentProduct: productBatches[0]?.[1]?.title || "", errors: [] });
+
+    // Send all changes in one request but show progress UI
+    // For true per-product progress, we use execute_batch action
+    const BATCH_SIZE = 3; // Process 3 products per batch request
+    let allSuccessCount = 0;
+    let allErrorCount = 0;
+    const allErrors = [];
+    const allHistoryIds = [];
+    let completedProducts = 0;
+
+    for (let i = 0; i < productBatches.length; i += BATCH_SIZE) {
+      const batch = productBatches.slice(i, i + BATCH_SIZE);
+      const batchChanges = batch.flatMap(([, data]) => data.changes);
+      const currentTitle = batch[0]?.[1]?.title || "";
+
+      setExecutionProgress(prev => ({ ...prev, completed: completedProducts, currentProduct: currentTitle }));
+
+      try {
+        const formData = new FormData();
+        formData.append("intent", "execute_batch");
+        formData.append("changes", JSON.stringify(batchChanges));
+        formData.append("editName", editName || "Bulk Edit");
+        formData.append("batchIndex", String(i / BATCH_SIZE));
+        formData.append("totalBatches", String(Math.ceil(productBatches.length / BATCH_SIZE)));
+        formData.append("isLastBatch", String(i + BATCH_SIZE >= productBatches.length));
+        formData.append("allChanges", i === 0 ? JSON.stringify(changesToSubmit) : "[]");
+
+        const response = await fetch("", { method: "POST", body: formData });
+        const result = await response.json();
+
+        if (result.success) {
+          allSuccessCount += result.successCount || 0;
+          allErrorCount += result.errorCount || 0;
+          if (result.errors?.length) allErrors.push(...result.errors);
+        } else {
+          allErrorCount += batchChanges.length;
+          allErrors.push({ product: currentTitle, errors: [result.message || "Batch failed"] });
+        }
+      } catch (err) {
+        allErrorCount += batchChanges.length;
+        allErrors.push({ product: currentTitle, errors: [err.message || "Network error"] });
+      }
+
+      completedProducts += batch.length;
+      setExecutionProgress(prev => ({ ...prev, completed: completedProducts }));
+    }
+
+    // Done — show results
+    setExecutionProgress(null);
+    const finalResult = { success: true, successCount: allSuccessCount, errorCount: allErrorCount, errors: allErrors, totalProducts };
+    setExecutionResult(finalResult);
+    setStep(4);
+    shopify.toast.show(allSuccessCount + " changes applied" + (allErrorCount > 0 ? ", " + allErrorCount + " errors" : ""));
   };
 
   const handleRevert = () => {
@@ -1267,17 +1459,6 @@ export default function BulkEdit() {
     if (fetcher.data?.limitReached) {
       shopify.toast.show(`Free plan allows up to ${fetcher.data.productsPerEdit || 15} products per edit. Upgrade for unlimited!`, { isError: true });
     }
-    if (fetcher.data?.networkError) {
-      setNetworkError(fetcher.data.message || "A network error occurred. Some changes may have been applied.");
-      setStep(4);
-      setExecutionResult({ successCount: 0, errorCount: 0, errors: [], totalProducts: 0, networkError: true });
-    }
-    if (fetcher.data?.success && !fetcher.data?.reverted) {
-      setNetworkError(null);
-      setExecutionResult(fetcher.data);
-      setStep(4);
-      shopify.toast.show(fetcher.data.successCount + " changes applied" + (fetcher.data.errorCount > 0 ? ", " + fetcher.data.errorCount + " errors" : ""));
-    }
     if (fetcher.data?.reverted) {
       shopify.toast.show("Reverted " + fetcher.data.successCount + " changes to original values");
       setExecutionResult(null);
@@ -1287,17 +1468,7 @@ export default function BulkEdit() {
     }
   }, [fetcher.data]);
 
-  // Detect network errors from fetcher (connection drops during POST)
-  useEffect(() => {
-    if (fetcher.state === "idle" && !fetcher.data && lastChanges && step === 3) {
-      // fetcher finished but returned no data — likely a network error
-      setNetworkError("The connection was interrupted during execution. Some changes may have been applied to your products. Please check the History page to see what was saved.");
-      setStep(4);
-      setExecutionResult({ successCount: 0, errorCount: 0, errors: [], totalProducts: 0, networkError: true });
-    }
-  }, [fetcher.state]);
-
-  const isExecuting = fetcher.state !== "idle";
+  const isExecuting = fetcher.state !== "idle" || !!executionProgress;
 
   // ── Field label helper ──
   const fieldLabel = (fieldValue) => {
@@ -1912,26 +2083,65 @@ export default function BulkEdit() {
             </div>
           </s-box>
 
-          {/* Warning */}
-          <s-box padding="base">
-            <div style={{ padding: "14px 16px", backgroundColor: "#fef8e8", border: "1px solid #f5d680", borderRadius: "10px" }}>
-              <div style={{ fontWeight: 700, color: "#916a00", marginBottom: "4px" }}>Before you execute</div>
-              <div style={{ fontSize: "13px", color: "#4a3800" }}>
-                This will update <strong>{changes.length}</strong> field{changes.length !== 1 ? "s" : ""} across <strong>{selected.length}</strong> product{selected.length !== 1 ? "s" : ""}. Changes take effect immediately. You can undo from the results page.
+          {/* Progress Bar — shown during execution */}
+          {executionProgress && (
+            <s-box padding="base">
+              <div style={{ padding: "20px", backgroundColor: "#f0f7ff", border: "1px solid #c4d7f2", borderRadius: "12px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+                  <div style={{ fontWeight: 700, fontSize: "15px", color: "#1a3a6b" }}>Applying Changes...</div>
+                  <div style={{ fontSize: "14px", fontWeight: 600, color: "#2c6ecb" }}>
+                    {executionProgress.completed} / {executionProgress.total} products
+                  </div>
+                </div>
+                {/* Progress bar track */}
+                <div style={{ width: "100%", height: "12px", backgroundColor: "#e1e8f0", borderRadius: "6px", overflow: "hidden", position: "relative" }}>
+                  <div style={{
+                    width: `${executionProgress.total > 0 ? (executionProgress.completed / executionProgress.total) * 100 : 0}%`,
+                    height: "100%",
+                    background: "linear-gradient(90deg, #2c6ecb, #008060)",
+                    borderRadius: "6px",
+                    transition: "width 0.4s ease",
+                    position: "relative",
+                  }}>
+                    <div style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent)", animation: "shimmer 1.5s infinite" }} />
+                  </div>
+                </div>
+                {/* Percentage */}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "8px" }}>
+                  <div style={{ fontSize: "12px", color: "#637381", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "70%" }}>
+                    Updating: {executionProgress.currentProduct}
+                  </div>
+                  <div style={{ fontSize: "13px", fontWeight: 600, color: "#2c6ecb" }}>
+                    {executionProgress.total > 0 ? Math.round((executionProgress.completed / executionProgress.total) * 100) : 0}%
+                  </div>
+                </div>
               </div>
-            </div>
-          </s-box>
+              <style>{`@keyframes shimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(100%); } }`}</style>
+            </s-box>
+          )}
+
+          {/* Warning — hidden during execution */}
+          {!executionProgress && (
+            <s-box padding="base">
+              <div style={{ padding: "14px 16px", backgroundColor: "#fef8e8", border: "1px solid #f5d680", borderRadius: "10px" }}>
+                <div style={{ fontWeight: 700, color: "#916a00", marginBottom: "4px" }}>Before you execute</div>
+                <div style={{ fontSize: "13px", color: "#4a3800" }}>
+                  This will update <strong>{changes.length}</strong> field{changes.length !== 1 ? "s" : ""} across <strong>{selected.length}</strong> product{selected.length !== 1 ? "s" : ""}. Changes take effect immediately. You can undo from the results page.
+                </div>
+              </div>
+            </s-box>
+          )}
 
           {/* Navigation */}
           <s-box padding="base">
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <button style={styles.secondaryBtn} onClick={() => setStep(2)}>← Back to Configure</button>
+              <button style={styles.secondaryBtn} onClick={() => setStep(2)} disabled={!!executionProgress}>← Back to Configure</button>
               <button
-                style={{ ...styles.primaryBtn(changes.length > 0 && !isExecuting), backgroundColor: changes.length > 0 && !isExecuting ? "#008060" : "#c4cdd5" }}
+                style={{ ...styles.primaryBtn(changes.length > 0 && !executionProgress), backgroundColor: changes.length > 0 && !executionProgress ? "#008060" : "#c4cdd5" }}
                 onClick={handleExecute}
-                disabled={changes.length === 0 || isExecuting}
+                disabled={changes.length === 0 || !!executionProgress}
               >
-                {isExecuting ? "Executing..." : `Apply ${changes.length} Change${changes.length !== 1 ? "s" : ""}`}
+                {executionProgress ? `Applying... ${executionProgress.completed}/${executionProgress.total}` : `Apply ${changes.length} Change${changes.length !== 1 ? "s" : ""}`}
               </button>
             </div>
           </s-box>
