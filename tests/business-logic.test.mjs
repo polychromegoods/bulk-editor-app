@@ -296,26 +296,30 @@ describe("evaluateFilter — variant-level fields", () => {
    6. Plan Limit Tests
    ═══════════════════════════════════════════════════════════ */
 describe("canPerformEdit — plan limits", () => {
-  it("free plan allows up to 3 edits", () => {
+  it("free plan allows unlimited edits", () => {
     expect(canPerformEdit("free", 0)).toBe(true);
-    expect(canPerformEdit("free", 2)).toBe(true);
-    expect(canPerformEdit("free", 3)).toBe(false);
-    expect(canPerformEdit("free", 10)).toBe(false);
+    expect(canPerformEdit("free", 100)).toBe(true);
+    expect(canPerformEdit("free", 999999)).toBe(true);
   });
 
-  it("pro plan allows up to 50 edits", () => {
+  it("unlimited plan allows unlimited edits", () => {
+    expect(canPerformEdit("unlimited", 0)).toBe(true);
+    expect(canPerformEdit("unlimited", 999999)).toBe(true);
+  });
+
+  it("pro plan allows unlimited edits", () => {
     expect(canPerformEdit("pro", 0)).toBe(true);
-    expect(canPerformEdit("pro", 49)).toBe(true);
-    expect(canPerformEdit("pro", 50)).toBe(false);
+    expect(canPerformEdit("pro", 999999)).toBe(true);
   });
 
-  it("plus plan allows unlimited edits", () => {
-    expect(canPerformEdit("plus", 0)).toBe(true);
-    expect(canPerformEdit("plus", 999999)).toBe(true);
+  it("premium plan allows unlimited edits", () => {
+    expect(canPerformEdit("premium", 0)).toBe(true);
+    expect(canPerformEdit("premium", 999999)).toBe(true);
   });
 
   it("unknown plan defaults to free limits", () => {
-    expect(canPerformEdit("unknown", 3)).toBe(false);
+    expect(canPerformEdit("unknown", 0)).toBe(true);
+    expect(canPerformEdit("unknown", 999999)).toBe(true);
   });
 });
 
@@ -339,27 +343,39 @@ describe("shouldResetMonthlyEdits", () => {
 });
 
 describe("PLAN_LIMITS structure", () => {
-  it("has all three plans defined", () => {
+  it("has all four plans defined", () => {
     expect(PLAN_LIMITS).toHaveProperty("free");
+    expect(PLAN_LIMITS).toHaveProperty("unlimited");
     expect(PLAN_LIMITS).toHaveProperty("pro");
-    expect(PLAN_LIMITS).toHaveProperty("plus");
+    expect(PLAN_LIMITS).toHaveProperty("premium");
   });
 
   it("free plan has correct limits", () => {
-    expect(PLAN_LIMITS.free.editsPerMonth).toBe(3);
-    expect(PLAN_LIMITS.free.automations).toBe(false);
+    expect(PLAN_LIMITS.free.editsPerMonth).toBe(Infinity);
+    expect(PLAN_LIMITS.free.productsPerEdit).toBe(15);
+    expect(PLAN_LIMITS.free.automations).toBe(0);
     expect(PLAN_LIMITS.free.scheduled).toBe(false);
   });
 
-  it("pro plan has correct limits", () => {
-    expect(PLAN_LIMITS.pro.editsPerMonth).toBe(50);
-    expect(PLAN_LIMITS.pro.automations).toBe(false);
+  it("unlimited plan has correct limits", () => {
+    expect(PLAN_LIMITS.unlimited.editsPerMonth).toBe(Infinity);
+    expect(PLAN_LIMITS.unlimited.productsPerEdit).toBe(Infinity);
+    expect(PLAN_LIMITS.unlimited.automations).toBe(0);
+    expect(PLAN_LIMITS.unlimited.scheduled).toBe(true);
   });
 
-  it("plus plan has unlimited edits and automations", () => {
-    expect(PLAN_LIMITS.plus.editsPerMonth).toBe(Infinity);
-    expect(PLAN_LIMITS.plus.automations).toBe(true);
-    expect(PLAN_LIMITS.plus.scheduled).toBe(true);
+  it("pro plan has correct limits", () => {
+    expect(PLAN_LIMITS.pro.editsPerMonth).toBe(Infinity);
+    expect(PLAN_LIMITS.pro.productsPerEdit).toBe(Infinity);
+    expect(PLAN_LIMITS.pro.automations).toBe(3);
+    expect(PLAN_LIMITS.pro.scheduled).toBe(true);
+  });
+
+  it("premium plan has unlimited edits and automations", () => {
+    expect(PLAN_LIMITS.premium.editsPerMonth).toBe(Infinity);
+    expect(PLAN_LIMITS.premium.productsPerEdit).toBe(Infinity);
+    expect(PLAN_LIMITS.premium.automations).toBe(Infinity);
+    expect(PLAN_LIMITS.premium.scheduled).toBe(true);
   });
 });
 
