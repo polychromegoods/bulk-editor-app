@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { useLoaderData, useFetcher, useNavigate, useRouteError, isRouteErrorResponse } from "react-router";
+import { useLoaderData, useFetcher, useNavigate, useRouteError, isRouteErrorResponse, useRevalidator } from "react-router";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
@@ -2098,8 +2098,7 @@ export default function BulkEdit() {
                 </button>
               )}
               <button style={styles.primaryBtn(true)} onClick={() => {
-                setExecutionResult(null); setLastChanges(null); setSelectedIds(new Set());
-                setModifications([]); setActivePreset(null); setEditName(""); setNetworkError(null); setStep(1);
+                navigate("/app/bulk-edit", { replace: true });
               }}>Start New Bulk Edit</button>
               <button style={{ ...styles.secondaryBtn, fontWeight: 700 }} onClick={() => navigate("/app/history")}>View History</button>
               <button style={styles.secondaryBtn} onClick={() => navigate("/app")}>Back to Dashboard</button>
