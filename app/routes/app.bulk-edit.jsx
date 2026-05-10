@@ -381,136 +381,6 @@ export const action = async ({ request }) => {
     return { success: true, successCount, errorCount, errors, totalProducts: Object.keys(changesByProduct).length, partialWarning: errorCount > 0 };
   }
 
-  if (intent === "execute_batch") {
-    // Process a batch of changes (subset of products) for progress tracking
-    const changesRaw = formData.get("changes");
-    const editName = formData.get("editName") || "Bulk Edit";
-    const isLastBatch = formData.get("isLastBatch") === "true";
-    const allChangesRaw = formData.get("allChanges") || "[]";
-    const changes = JSON.parse(changesRaw);
-    const allChanges = JSON.parse(allChangesRaw);
-
-    let successCount = 0;
-    let errorCount = 0;
-    const errors = [];
-    const historyRecords = [];
-
-    // Group changes by product
-    const changesByProduct = {};
-    for (const change of changes) {
-      if (!changesByProduct[change.productId]) changesByProduct[change.productId] = [];
-      changesByProduct[change.productId].push(change);
-    }
-
-    for (const [productId, productChanges] of Object.entries(changesByProduct)) {
-      try {
-        const productLevelChanges = productChanges.filter(c => ["title", "vendor", "productType", "status", "tags", "templateSuffix"].includes(c.field));
-        const variantLevelChanges = productChanges.filter(c => ["price", "compareAtPrice", "sku", "barcode", "weight", "taxable"].includes(c.field));
-
-        if (productLevelChanges.length > 0) {
-          const productInput = {};
-          for (const change of productLevelChanges) {
-            if (change.field === "title") productInput.title = change.newValue;
-            else if (change.field === "vendor") productInput.vendor = change.newValue;
-            else if (change.field === "productType") productInput.productType = change.newValue;
-            else if (change.field === "status") productInput.status = change.newValue;
-            else if (change.field === "tags") productInput.tags = change.newValue.split(",").map(t => t.trim()).filter(Boolean);
-            else if (change.field === "templateSuffix") productInput.templateSuffix = change.newValue;
-          }
-          const result = await admin.graphql(`#graphql
-            mutation productUpdate($input: ProductInput!) {
-              productUpdate(input: $input) {
-                product { id }
-                userErrors { field message }
-              }
-            }`, { variables: { input: { id: productId, ...productInput } } });
-          const resultData = await result.json();
-          const userErrors = resultData.data?.productUpdate?.userErrors || [];
-          if (userErrors.length > 0) {
-            errorCount += productLevelChanges.length;
-            errors.push({ product: productChanges[0]?.productTitle, errors: userErrors.map(e => e.message) });
-          } else {
-            successCount += productLevelChanges.length;
-            for (const change of productLevelChanges) {
-              historyRecords.push({ shop: session.shop, productId: change.productId, variantId: change.variantId || productId, productTitle: change.productTitle, variantTitle: change.variantTitle || null, oldPrice: change.oldValue, newPrice: change.newValue, changeType: change.field, changeSource: "bulk_edit" });
-            }
-          }
-        }
-
-        if (variantLevelChanges.length > 0) {
-          const variantMap = {};
-          for (const change of variantLevelChanges) {
-            if (!variantMap[change.variantId]) variantMap[change.variantId] = { id: change.variantId };
-            const v = variantMap[change.variantId];
-            if (change.field === "price") v.price = change.newValue;
-            else if (change.field === "compareAtPrice") v.compareAtPrice = change.newValue;
-            else if (change.field === "sku") v.sku = change.newValue;
-            else if (change.field === "barcode") v.barcode = change.newValue;
-            else if (change.field === "weight") {
-              v.inventoryItem = v.inventoryItem || {};
-              v.inventoryItem.measurement = v.inventoryItem.measurement || {};
-              v.inventoryItem.measurement.weight = { value: parseFloat(change.newValue), unit: "POUNDS" };
-            }
-          }
-          const variants = Object.values(variantMap);
-          const result = await admin.graphql(`#graphql
-            mutation productVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
-              productVariantsBulkUpdate(productId: $productId, variants: $variants) {
-                product { id }
-                productVariants { id }
-                userErrors { field message }
-              }
-            }`, { variables: { productId, variants } });
-          const resultData = await result.json();
-          const userErrors = resultData.data?.productVariantsBulkUpdate?.userErrors || [];
-          if (userErrors.length > 0) {
-            errorCount += variantLevelChanges.length;
-            errors.push({ product: productChanges[0]?.productTitle, errors: userErrors.map(e => e.message) });
-          } else {
-            successCount += variantLevelChanges.length;
-            for (const change of variantLevelChanges) {
-              historyRecords.push({ shop: session.shop, productId: change.productId, variantId: change.variantId, productTitle: change.productTitle, variantTitle: change.variantTitle || null, oldPrice: change.oldValue, newPrice: change.newValue, changeType: change.field, changeSource: "bulk_edit" });
-            }
-          }
-        }
-      } catch (err) {
-        errorCount += productChanges.length;
-        errors.push({ product: productChanges[0]?.productTitle, errors: [err.message || "Unknown error"] });
-      }
-    }
-
-    // Save to DB only on last batch (or if single batch)
-    if (isLastBatch) {
-      try {
-        const bulkEditRecord = await prisma.bulkEdit.create({
-          data: {
-            shop: session.shop,
-            name: editName,
-            status: "completed",
-            productCount: successCount,
-            changes: JSON.stringify((allChanges.length > 0 ? allChanges : changes).slice(0, 50)),
-          },
-        });
-        const enrichedHistoryRecords = historyRecords.map(record => ({ ...record, bulkEditId: bulkEditRecord.id, bulkEditName: editName }));
-        if (enrichedHistoryRecords.length > 0) {
-          await prisma.priceHistory.createMany({ data: enrichedHistoryRecords });
-        }
-        await prisma.shopPlan.update({ where: { shop: session.shop }, data: { monthlyEdits: { increment: 1 } } });
-      } catch (dbErr) {
-        console.error("[BulkEdit] Database save error:", dbErr.message);
-      }
-    } else if (historyRecords.length > 0) {
-      // Save history records for intermediate batches too
-      try {
-        await prisma.priceHistory.createMany({ data: historyRecords.map(r => ({ ...r, bulkEditName: editName })) });
-      } catch (dbErr) {
-        console.error("[BulkEdit] Intermediate history save error:", dbErr.message);
-      }
-    }
-
-    return { success: true, successCount, errorCount, errors };
-  }
-
   if (intent === "search_products") {
     // Server-side product search using Shopify's query parameter
     const searchQuery = formData.get("query") || "";
@@ -1354,7 +1224,7 @@ export default function BulkEdit() {
   // ── Execution ──
   const handleExecute = () => setShowConfirmDialog(true);
 
-  const confirmExecute = async () => {
+  const confirmExecute = () => {
     setShowConfirmDialog(false);
     // Build changes fresh
     const changesToSubmit = [];
@@ -1384,69 +1254,18 @@ export default function BulkEdit() {
     if (changesToSubmit.length === 0) { shopify.toast.show("No changes to apply"); return; }
     setLastChanges(changesToSubmit);
 
-    // Group changes by product for batch execution with progress
-    const changesByProduct = {};
-    for (const c of changesToSubmit) {
-      if (!changesByProduct[c.productId]) changesByProduct[c.productId] = { title: c.productTitle, changes: [] };
-      changesByProduct[c.productId].changes.push(c);
-    }
-    const productBatches = Object.entries(changesByProduct);
-    const totalProducts = productBatches.length;
+    // Count unique products for progress display
+    const uniqueProducts = new Set(changesToSubmit.map(c => c.productId));
+    const totalProducts = uniqueProducts.size;
 
-    setExecutionProgress({ completed: 0, total: totalProducts, currentProduct: productBatches[0]?.[1]?.title || "", errors: [] });
+    // Start simulated progress bar — estimates ~0.5s per product
+    setExecutionProgress({ completed: 0, total: totalProducts, currentProduct: "Starting...", errors: [] });
 
-    // Send all changes in one request but show progress UI
-    // For true per-product progress, we use execute_batch action
-    const BATCH_SIZE = 3; // Process 3 products per batch request
-    let allSuccessCount = 0;
-    let allErrorCount = 0;
-    const allErrors = [];
-    const allHistoryIds = [];
-    let completedProducts = 0;
-
-    for (let i = 0; i < productBatches.length; i += BATCH_SIZE) {
-      const batch = productBatches.slice(i, i + BATCH_SIZE);
-      const batchChanges = batch.flatMap(([, data]) => data.changes);
-      const currentTitle = batch[0]?.[1]?.title || "";
-
-      setExecutionProgress(prev => ({ ...prev, completed: completedProducts, currentProduct: currentTitle }));
-
-      try {
-        const formData = new FormData();
-        formData.append("intent", "execute_batch");
-        formData.append("changes", JSON.stringify(batchChanges));
-        formData.append("editName", editName || "Bulk Edit");
-        formData.append("batchIndex", String(i / BATCH_SIZE));
-        formData.append("totalBatches", String(Math.ceil(productBatches.length / BATCH_SIZE)));
-        formData.append("isLastBatch", String(i + BATCH_SIZE >= productBatches.length));
-        formData.append("allChanges", i === 0 ? JSON.stringify(changesToSubmit) : "[]");
-
-        const response = await fetch("", { method: "POST", body: formData });
-        const result = await response.json();
-
-        if (result.success) {
-          allSuccessCount += result.successCount || 0;
-          allErrorCount += result.errorCount || 0;
-          if (result.errors?.length) allErrors.push(...result.errors);
-        } else {
-          allErrorCount += batchChanges.length;
-          allErrors.push({ product: currentTitle, errors: [result.message || "Batch failed"] });
-        }
-      } catch (err) {
-        allErrorCount += batchChanges.length;
-        allErrors.push({ product: currentTitle, errors: [err.message || "Network error"] });
-      }
-
-      completedProducts += batch.length;
-      setExecutionProgress(prev => ({ ...prev, completed: completedProducts }));
-    }
-
-    // Done — show results
-    setExecutionProgress(null);
-    const finalResult = { success: true, successCount: allSuccessCount, errorCount: allErrorCount, errors: allErrors, totalProducts };
-    setExecutionResult(finalResult);
-    setStep(4);
-    shopify.toast.show(allSuccessCount + " changes applied" + (allErrorCount > 0 ? ", " + allErrorCount + " errors" : ""));
+    // Submit via fetcher (works properly in Shopify embedded apps)
+    fetcher.submit(
+      { intent: "execute", changes: JSON.stringify(changesToSubmit), editName: editName || "Bulk Edit" },
+      { method: "POST" }
+    );
   };
 
   const handleRevert = () => {
@@ -1454,9 +1273,36 @@ export default function BulkEdit() {
     fetcher.submit({ intent: "revert", changes: JSON.stringify(lastChanges) }, { method: "POST" });
   };
 
+  // Simulated progress animation while server processes changes
+  useEffect(() => {
+    if (!executionProgress || fetcher.state === "idle") return;
+    const { total } = executionProgress;
+    const intervalMs = Math.max(300, Math.min(800, (total * 500) / total)); // ~0.5s per product
+    const timer = setInterval(() => {
+      setExecutionProgress(prev => {
+        if (!prev) return null;
+        const next = prev.completed + 1;
+        if (next >= prev.total) {
+          // Don't exceed total — wait for server response to finalize
+          return { ...prev, completed: prev.total - 1, currentProduct: "Finishing up..." };
+        }
+        return { ...prev, completed: next, currentProduct: `Processing product ${next + 1} of ${prev.total}...` };
+      });
+    }, intervalMs);
+    return () => clearInterval(timer);
+  }, [executionProgress?.total, fetcher.state]);
+
   useEffect(() => {
     if (fetcher.data?.limitReached) {
+      setExecutionProgress(null);
       shopify.toast.show(`Free plan allows up to ${fetcher.data.productsPerEdit || 15} products per edit. Upgrade for unlimited!`, { isError: true });
+    }
+    if (fetcher.data?.successCount !== undefined && fetcher.data?.intent !== "revert" && !fetcher.data?.reverted && !fetcher.data?.limitReached) {
+      // Execute completed — show final results
+      setExecutionProgress(null);
+      setExecutionResult(fetcher.data);
+      setStep(4);
+      shopify.toast.show(fetcher.data.successCount + " changes applied" + (fetcher.data.errorCount > 0 ? ", " + fetcher.data.errorCount + " errors" : ""));
     }
     if (fetcher.data?.reverted) {
       shopify.toast.show("Reverted " + fetcher.data.successCount + " changes to original values");
@@ -1464,6 +1310,10 @@ export default function BulkEdit() {
       setLastChanges(null);
       setNetworkError(null);
       setStep(1);
+    }
+    if (fetcher.data?.networkError) {
+      setExecutionProgress(null);
+      setNetworkError(fetcher.data.message);
     }
   }, [fetcher.data]);
 
