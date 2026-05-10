@@ -442,16 +442,9 @@ export default function Billing() {
   }, [fetcher.data]);
 
   const handleChangePlan = (planKey) => {
-    // Redirect directly to the specific plan's subscription page, skipping the intermediate pricing page
-    const handle = PLAN_HANDLES[planKey];
-    if (handle) {
-      // Use the direct plan handle URL to go straight to the Shopify subscription approval page
-      const directUrl = `https://admin.shopify.com/store/${storeHandle}/charges/bulk-editor-prox/pricing_plans/${handle}/${displayInterval === "yearly" ? "yearly" : "monthly"}`;
-      window.open(directUrl, "_top");
-    } else {
-      // Fallback to generic pricing page
-      window.open(planSelectionUrl, "_top");
-    }
+    // Managed pricing: redirect to Shopify's pricing plans page
+    // Shopify handles plan selection and subscription approval on their end
+    window.open(planSelectionUrl, "_top");
   };
 
   const handleTestSwitch = (planKey) => {
