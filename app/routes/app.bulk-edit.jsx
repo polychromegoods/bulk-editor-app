@@ -971,16 +971,19 @@ export default function BulkEdit() {
           else if (rule.operator === "not_contains" || rule.operator === "not_equals") parts.push(`-tag:${val}`);
           break;
         case "title":
-          if (rule.operator === "contains" || rule.operator === "equals") parts.push(`title:*${val}*`);
+          if (rule.operator === "equals") parts.push(`title:"${val}"`);
+          else if (rule.operator === "contains") parts.push(`title:*${val}*`);
           else if (rule.operator === "not_contains") parts.push(`-title:*${val}*`);
           break;
         case "vendor":
-          if (rule.operator === "contains" || rule.operator === "equals") parts.push(`vendor:${val}`);
-          else if (rule.operator === "not_equals") parts.push(`-vendor:${val}`);
+          if (rule.operator === "equals") parts.push(`vendor:"${val}"`);
+          else if (rule.operator === "contains") parts.push(`vendor:*${val}*`);
+          else if (rule.operator === "not_equals") parts.push(`-vendor:"${val}"`);
           break;
         case "productType":
-          if (rule.operator === "contains" || rule.operator === "equals") parts.push(`product_type:${val}`);
-          else if (rule.operator === "not_equals") parts.push(`-product_type:${val}`);
+          if (rule.operator === "equals") parts.push(`product_type:"${val}"`);
+          else if (rule.operator === "contains") parts.push(`product_type:*${val}*`);
+          else if (rule.operator === "not_equals") parts.push(`-product_type:"${val}"`);
           break;
         case "status":
           if (rule.operator === "equals") parts.push(`status:${val.toLowerCase()}`);
@@ -1111,14 +1114,10 @@ export default function BulkEdit() {
   // Filtered products — use server results when available, otherwise client-side
   const filtered = useMemo(() => {
     if (serverFilteredProducts !== null) {
-      // Server-side results already filtered, but apply any client-only filters
-      const clientOnlyRules = filterRules.filter(r => {
-        return ["variantTitle", "compareAtPrice", "weight", "templateSuffix"].includes(r.field) ||
-          ["is_empty", "is_not_empty", "starts_with", "ends_with", "between"].includes(r.operator);
-      });
-      if (clientOnlyRules.length === 0) return serverFilteredProducts;
+      // Server-side results from Shopify, but Shopify's query can return fuzzy matches.
+      // Apply ALL filter rules client-side to ensure exact matching (especially for vendor/title equals).
       return serverFilteredProducts.filter(p => {
-        for (const rule of clientOnlyRules) {
+        for (const rule of filterRules) {
           if (!evaluateFilter(p, rule)) return false;
         }
         return true;

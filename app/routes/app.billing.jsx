@@ -408,6 +408,14 @@ export default function Billing() {
   // Shopify-hosted plan selection page URL
   const planSelectionUrl = `https://admin.shopify.com/store/${storeHandle}/charges/bulk-editor-prox/pricing_plans`;
 
+  // Map plan keys to their Shopify managed pricing plan handles
+  const PLAN_HANDLES = {
+    free: "bulk-editor-free",
+    unlimited: "bulk-editor-unlimited",
+    pro: "bulk-editor-pro",
+    premium: "bulk-editor-premium",
+  };
+
   useEffect(() => {
     if (fetcher.data?.cancelled) {
       shopify.toast.show("To complete the downgrade, please change your plan on the Shopify billing page.");
@@ -433,9 +441,17 @@ export default function Billing() {
     }
   }, [fetcher.data]);
 
-  const handleChangePlan = () => {
-    // Redirect to Shopify's hosted plan selection page
-    window.open(planSelectionUrl, "_top");
+  const handleChangePlan = (planKey) => {
+    // Redirect directly to the specific plan's subscription page, skipping the intermediate pricing page
+    const handle = PLAN_HANDLES[planKey];
+    if (handle) {
+      // Use the direct plan handle URL to go straight to the Shopify subscription approval page
+      const directUrl = `https://admin.shopify.com/store/${storeHandle}/charges/bulk-editor-prox/pricing_plans/${handle}/${displayInterval === "yearly" ? "yearly" : "monthly"}`;
+      window.open(directUrl, "_top");
+    } else {
+      // Fallback to generic pricing page
+      window.open(planSelectionUrl, "_top");
+    }
   };
 
   const handleTestSwitch = (planKey) => {
@@ -728,13 +744,13 @@ export default function Billing() {
                       </div>
                     ) : (
                       <button
-                        onClick={handleChangePlan}
+                        onClick={() => handleChangePlan(plan.key)}
                         style={{
                           width: "100%",
                           padding: "12px 24px",
                           borderRadius: "8px",
                           border: isUpgrade ? "none" : "1px solid #c4cdd5",
-                          backgroundColor: isUpgrade ? (plan.highlight ? "#2c6ecb" : "#202223") : "white",
+                          backgroundColor: isUpgrade ? "#2c6ecb" : "white",
                           color: isUpgrade ? "white" : "#637381",
                           fontWeight: 700,
                           fontSize: "14px",
