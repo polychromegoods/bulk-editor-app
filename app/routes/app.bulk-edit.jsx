@@ -752,7 +752,7 @@ const styles = {
     backgroundColor: tone === "success" ? "#e3f1df" : tone === "critical" ? "#fef3f2" : tone === "warning" ? "#fef8e8" : "#e4e5e7",
     color: tone === "success" ? "#1a7f37" : tone === "critical" ? "#d72c0d" : tone === "warning" ? "#916a00" : "#637381",
   }),
-  filterRule: { display: "flex", gap: "6px", alignItems: "center", padding: "8px 10px", backgroundColor: "#f9fafb", borderRadius: "8px", marginBottom: "6px", border: "1px solid #e1e3e5", flexWrap: "wrap" },
+  filterRule: { display: "flex", gap: "6px", alignItems: "center", padding: "8px 10px", backgroundColor: "#f9fafb", borderRadius: "8px", marginBottom: "6px", border: "1px solid #e1e3e5", flexWrap: "wrap", boxSizing: "border-box" },
 };
 
 /* ═══════════════════════════════════════════════════════════════
@@ -823,11 +823,23 @@ export default function BulkEdit() {
 
   // Handle server-side search response
   useEffect(() => {
-    if (searchFetcher.data && searchFetcher.state === "idle" && searchFetcher.data.intent === "search_products") {
-      setServerFilteredProducts(searchFetcher.data.products || []);
+    if (searchFetcher.state === "idle" && searchFetcher.data) {
+      // Clear searching state whenever fetcher returns to idle with data
+      if (searchFetcher.data.intent === "search_products") {
+        setServerFilteredProducts(searchFetcher.data.products || []);
+      }
       setIsSearching(false);
     }
   }, [searchFetcher.data, searchFetcher.state]);
+
+  // Safety timeout: if searching takes more than 15 seconds, stop the spinner
+  useEffect(() => {
+    if (!isSearching) return;
+    const timeout = setTimeout(() => {
+      setIsSearching(false);
+    }, 15000);
+    return () => clearTimeout(timeout);
+  }, [isSearching]);
 
   // Build Shopify query string from filter rules and trigger server-side search
   const buildShopifyQuery = useCallback((rules) => {
@@ -1085,8 +1097,16 @@ export default function BulkEdit() {
       const cur = current || "";
       switch (mod.type) {
         case "set": return mod.value;
-        case "prepend": return mod.value + cur;
-        case "append": return cur + mod.value;
+        case "prepend": {
+          if (!cur) return mod.value;
+          const sep = (mod.value.endsWith(" ") || cur.startsWith(" ")) ? "" : " ";
+          return mod.value + sep + cur;
+        }
+        case "append": {
+          if (!cur) return mod.value;
+          const sep = (cur.endsWith(" ") || mod.value.startsWith(" ")) ? "" : " ";
+          return cur + sep + mod.value;
+        }
         case "find_replace": return cur.split(mod.value).join(mod.value2 || "");
         default: return cur;
       }
@@ -1381,11 +1401,11 @@ export default function BulkEdit() {
       {/* Billing banner */}
       {currentPlan === "free" && (
         <s-box padding="base">
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", backgroundColor: "#f0f5ff", borderRadius: "10px", border: "1px solid #c4d7f2" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", backgroundColor: "#f0f5ff", borderRadius: "10px", border: "1px solid #c4d7f2", flexWrap: "wrap", gap: "8px" }}>
             <span style={{ fontSize: "14px", color: "#1a3a6b" }}>
               Free plan: up to <strong>{productsPerEdit}</strong> products per edit. Upgrade for unlimited.
             </span>
-            <button style={{ ...styles.primaryBtn(true), padding: "6px 16px", fontSize: "13px" }} onClick={() => navigate("/app/billing")}>View Plans</button>
+            <button style={{ ...styles.primaryBtn(true), padding: "6px 16px", fontSize: "13px", whiteSpace: "nowrap" }} onClick={() => navigate("/app/billing")}>View Plans</button>
           </div>
         </s-box>
       )}
@@ -1419,12 +1439,12 @@ export default function BulkEdit() {
         <s-section>
           {/* Filter builder */}
           <s-box padding="base">
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
-              <div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "10px", flexWrap: "wrap", gap: "8px" }}>
+              <div style={{ minWidth: 0 }}>
                 <div style={{ fontWeight: 600, fontSize: "15px", color: "#202223" }}>Filter Products</div>
                 <div style={{ fontSize: "12px", color: "#637381" }}>Add rules to narrow down which products to edit</div>
               </div>
-              <div style={{ display: "flex", gap: "8px" }}>
+              <div style={{ display: "flex", gap: "8px", flexShrink: 0 }}>
                 {filterRules.length > 0 && (
                   <button onClick={clearAllFilters} style={{ ...styles.secondaryBtn, padding: "6px 12px", fontSize: "12px", color: "#d72c0d" }}>Clear All</button>
                 )}
@@ -1520,14 +1540,14 @@ export default function BulkEdit() {
 
           {/* Select all */}
           <s-box padding="base">
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "6px" }}>
               <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer" }}>
                 <input type="checkbox" checked={selectedIds.size === filtered.length && filtered.length > 0} onChange={toggleAll} style={{ width: "18px", height: "18px" }} />
                 <span style={{ fontWeight: 600, fontSize: "14px" }}>
                   {selectedIds.size === filtered.length && filtered.length > 0 ? "Deselect All" : "Select All"} ({filtered.length})
                 </span>
               </label>
-              <div style={{ display: "flex", gap: "16px", fontSize: "13px", color: "#637381" }}>
+              <div style={{ display: "flex", gap: "12px", fontSize: "13px", color: "#637381" }}>
                 <span>{selectedIds.size} selected</span>
                 <span>{totalVariants} variant{totalVariants !== 1 ? "s" : ""}</span>
               </div>
@@ -1537,14 +1557,14 @@ export default function BulkEdit() {
           {/* Load all products button — hide when server-side filters are active */}
           {hasMore && serverFilteredProducts === null && (
             <s-box padding="base">
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", backgroundColor: "#f0f5ff", borderRadius: "10px", border: "1px solid #c4d7f2" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", backgroundColor: "#f0f5ff", borderRadius: "10px", border: "1px solid #c4d7f2", flexWrap: "wrap", gap: "8px" }}>
                 <span style={{ fontSize: "13px", color: "#1a3a6b" }}>
                   Showing {products.length} of {totalProductCount} products
                 </span>
                 <button
                   onClick={loadAllProducts}
                   disabled={isLoadingMore}
-                  style={{ ...styles.primaryBtn(!isLoadingMore), padding: "8px 16px", fontSize: "13px" }}
+                  style={{ ...styles.primaryBtn(!isLoadingMore), padding: "8px 16px", fontSize: "13px", whiteSpace: "nowrap" }}
                 >
                   {isLoadingMore ? "Loading..." : `Load All ${totalProductCount} Products`}
                 </button>
@@ -1595,11 +1615,11 @@ export default function BulkEdit() {
           </div>
 
           <s-box padding="base">
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" }}>
               <div style={{ fontSize: "13px", color: "#637381" }}>
                 {selectedIds.size > 0 ? `Ready to configure ${selectedIds.size} product${selectedIds.size !== 1 ? "s" : ""}` : "Select at least one product to continue"}
               </div>
-              <button style={styles.primaryBtn(canConfigure)} onClick={() => canConfigure && setStep(2)} disabled={!canConfigure}>
+              <button style={{ ...styles.primaryBtn(canConfigure), whiteSpace: "nowrap" }} onClick={() => canConfigure && setStep(2)} disabled={!canConfigure}>
                 Continue to Configure →
               </button>
             </div>
@@ -2098,7 +2118,7 @@ export default function BulkEdit() {
                 </button>
               )}
               <button style={styles.primaryBtn(true)} onClick={() => {
-                navigate("/app/bulk-edit", { replace: true });
+                window.location.href = "/app/bulk-edit";
               }}>Start New Bulk Edit</button>
               <button style={{ ...styles.secondaryBtn, fontWeight: 700 }} onClick={() => navigate("/app/history")}>View History</button>
               <button style={styles.secondaryBtn} onClick={() => navigate("/app")}>Back to Dashboard</button>

@@ -103,8 +103,18 @@ export function calcValue(current, mod) {
     const cur = current || "";
     switch (mod.type) {
       case "set": return mod.value;
-      case "prepend": return mod.value + cur;
-      case "append": return cur + mod.value;
+      case "prepend": {
+        if (!cur) return mod.value;
+        // Add space between prepended value and current text if neither already has one at the boundary
+        const sep = (mod.value.endsWith(" ") || cur.startsWith(" ")) ? "" : " ";
+        return mod.value + sep + cur;
+      }
+      case "append": {
+        if (!cur) return mod.value;
+        // Add space between current text and appended value if neither already has one at the boundary
+        const sep = (cur.endsWith(" ") || mod.value.startsWith(" ")) ? "" : " ";
+        return cur + sep + mod.value;
+      }
       case "find_replace": return cur.split(mod.value).join(mod.value2 || "");
       default: return cur;
     }
