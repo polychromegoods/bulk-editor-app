@@ -420,7 +420,21 @@ export default function Billing() {
     if (fetcher.data?.cancelled) {
       shopify.toast.show("To complete the downgrade, please change your plan on the Shopify billing page.");
       // Open Shopify's plan selection page so they can switch to Free
-      window.open(planSelectionUrl, "_top");
+      try {
+        if (window.top) {
+          window.top.location.href = planSelectionUrl;
+        } else {
+          window.location.href = planSelectionUrl;
+        }
+      } catch (e) {
+        const a = document.createElement('a');
+        a.href = planSelectionUrl;
+        a.target = '_top';
+        a.rel = 'noopener';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+      }
     }
     if (fetcher.data?.testSwitch) {
       shopify.toast.show(`Switched to ${fetcher.data.testSwitch} plan (test mode)`);
@@ -444,7 +458,24 @@ export default function Billing() {
   const handleChangePlan = (planKey) => {
     // Managed pricing: redirect to Shopify's pricing plans page
     // Shopify handles plan selection and subscription approval on their end
-    window.open(planSelectionUrl, "_top");
+    // Use window.top.location.href for reliable cross-frame navigation
+    // (window.open with _top can get stuck in loading state on mobile)
+    try {
+      if (window.top) {
+        window.top.location.href = planSelectionUrl;
+      } else {
+        window.location.href = planSelectionUrl;
+      }
+    } catch (e) {
+      // Cross-origin fallback: use an anchor element with target _top
+      const a = document.createElement('a');
+      a.href = planSelectionUrl;
+      a.target = '_top';
+      a.rel = 'noopener';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    }
   };
 
   const handleTestSwitch = (planKey) => {
@@ -736,9 +767,12 @@ export default function Billing() {
                         Current Plan
                       </div>
                     ) : (
-                      <button
-                        onClick={() => handleChangePlan(plan.key)}
+                      <a
+                        href={planSelectionUrl}
+                        target="_top"
+                        rel="noopener"
                         style={{
+                          display: "block",
                           width: "100%",
                           padding: "12px 24px",
                           borderRadius: "8px",
@@ -749,10 +783,13 @@ export default function Billing() {
                           fontSize: "14px",
                           cursor: "pointer",
                           transition: "all 0.15s",
+                          textDecoration: "none",
+                          textAlign: "center",
+                          boxSizing: "border-box",
                         }}
                       >
                         {isUpgrade ? `Upgrade to ${plan.name}` : `Switch to ${plan.name}`}
-                      </button>
+                      </a>
                     )}
                   </div>
                 </div>

@@ -708,15 +708,15 @@ const QUICK_PRESETS = [
 
 const styles = {
   stepIndicator: (active, completed, enabled) => ({
-    display: "flex", alignItems: "center", gap: "6px", padding: "8px 12px", borderRadius: "24px", border: "none",
+    display: "flex", alignItems: "center", gap: "4px", padding: "6px 8px", borderRadius: "24px", border: "none",
     cursor: enabled ? "pointer" : "default", fontWeight: active ? "700" : "500",
     backgroundColor: active ? "#2c6ecb" : completed ? "#e3f1df" : "transparent",
     color: active ? "white" : completed ? "#1a7f37" : enabled ? "#202223" : "#babec3",
-    fontSize: "13px", transition: "all 0.2s ease", opacity: enabled ? 1 : 0.5,
+    fontSize: "12px", transition: "all 0.2s ease", opacity: enabled ? 1 : 0.5,
   }),
   stepNumber: (active, completed) => ({
-    display: "inline-flex", alignItems: "center", justifyContent: "center", width: "24px", height: "24px",
-    borderRadius: "50%", fontSize: "12px", fontWeight: "700",
+    display: "inline-flex", alignItems: "center", justifyContent: "center", width: "20px", height: "20px",
+    borderRadius: "50%", fontSize: "11px", fontWeight: "700", flexShrink: 0,
     backgroundColor: active ? "rgba(255,255,255,0.2)" : completed ? "#1a7f37" : "#e4e5e7",
     color: active ? "white" : completed ? "white" : "#637381",
   }),
@@ -735,8 +735,9 @@ const styles = {
   }),
   card: { border: "1px solid #e1e3e5", borderRadius: "12px", padding: "16px", marginBottom: "12px", backgroundColor: "white" },
   productRow: (selected) => ({
-    display: "flex", alignItems: "center", gap: "10px", padding: "10px 12px", borderBottom: "1px solid #f1f2f3",
+    display: "flex", alignItems: "center", gap: "8px", padding: "10px 8px", borderBottom: "1px solid #f1f2f3",
     cursor: "pointer", backgroundColor: selected ? "#f0f5ff" : "transparent", transition: "background-color 0.1s",
+    maxWidth: "100%", boxSizing: "border-box", overflow: "hidden",
   }),
   presetBtn: (active) => ({
     display: "flex", flexDirection: "column", alignItems: "center", gap: "4px", padding: "12px 16px", borderRadius: "10px",
@@ -744,8 +745,8 @@ const styles = {
     cursor: "pointer", minWidth: "80px", transition: "all 0.15s", fontSize: "12px", fontWeight: "600", color: "#202223",
   }),
   summaryCard: (color) => ({
-    flex: 1, minWidth: "120px", padding: "20px", border: "1px solid #e1e3e5", borderRadius: "12px",
-    textAlign: "center", borderTop: `3px solid ${color || "#e1e3e5"}`, backgroundColor: "white",
+    flex: 1, minWidth: "80px", padding: "14px 10px", border: "1px solid #e1e3e5", borderRadius: "12px",
+    textAlign: "center", borderTop: `3px solid ${color || "#e1e3e5"}`, backgroundColor: "white", boxSizing: "border-box",
   }),
   badge: (tone) => ({
     display: "inline-block", padding: "2px 8px", borderRadius: "10px", fontSize: "11px", fontWeight: "600",
@@ -1398,6 +1399,18 @@ export default function BulkEdit() {
 
   return (
     <s-page title="Bulk Editor" subtitle="Edit any product field in bulk">
+      {/* Global mobile overflow fix */}
+      <style dangerouslySetInnerHTML={{ __html: `
+        s-page, s-section, s-box { max-width: 100% !important; overflow-x: hidden !important; box-sizing: border-box !important; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @media (max-width: 480px) {
+          /* Filter rules: stack vertically on very small screens */
+          .filter-rule-row { flex-direction: column !important; align-items: stretch !important; }
+          .filter-rule-row select, .filter-rule-row input { min-width: 100% !important; width: 100% !important; }
+          /* Modification grids: single column on mobile */
+          .mod-grid-2col { grid-template-columns: 1fr !important; }
+        }
+      ` }} />
       {/* Billing banner */}
       {currentPlan === "free" && (
         <s-box padding="base">
@@ -1412,13 +1425,13 @@ export default function BulkEdit() {
 
       {/* Step indicator */}
       <s-box padding="base">
-        <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: "4px", flexWrap: "wrap" }}>
+        <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: "2px", flexWrap: "wrap", maxWidth: "100%" }}>
           {[
-            { num: 1, label: "Select\nProducts" },
+            { num: 1, label: "Select" },
             { num: 2, label: "Configure" },
-            { num: 3, label: "Review &\nExecute" },
+            { num: 3, label: "Review" },
           ].map((s, i) => (
-            <div key={s.num} style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+            <div key={s.num} style={{ display: "flex", alignItems: "center", gap: "2px" }}>
               <button
                 style={styles.stepIndicator(step === s.num, step > s.num, step >= s.num)}
                 onClick={() => { if (step > s.num) setStep(s.num); }}
@@ -1426,9 +1439,9 @@ export default function BulkEdit() {
                 <span style={styles.stepNumber(step === s.num, step > s.num)}>
                   {step > s.num ? "✓" : s.num}
                 </span>
-                <span style={{ whiteSpace: "nowrap" }}>{s.label.replace("\n", " ")}</span>
+                <span style={{ whiteSpace: "nowrap" }}>{s.label}</span>
               </button>
-              {i < 2 && <span style={{ color: "#babec3", fontSize: "16px" }}>›</span>}
+              {i < 2 && <span style={{ color: "#babec3", fontSize: "14px" }}>›</span>}
             </div>
           ))}
         </div>
@@ -1457,7 +1470,7 @@ export default function BulkEdit() {
               const fieldType = FILTER_FIELDS.find(f => f.value === rule.field)?.type || "text";
               const fieldOptions = FILTER_FIELDS.find(f => f.value === rule.field)?.options || [];
               return (
-                <div key={rule.id} style={styles.filterRule}>
+                <div key={rule.id} className="filter-rule-row" style={styles.filterRule}>
                   <span style={{ fontSize: "12px", fontWeight: 600, color: "#637381", minWidth: "40px" }}>{idx === 0 ? "Where" : "AND"}</span>
                   <select value={rule.field} onChange={(e) => updateFilterRule(rule.id, "field", e.target.value)} style={{ ...styles.select, width: "auto", minWidth: "120px" }}>
                     {FILTER_FIELDS.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
@@ -1573,7 +1586,7 @@ export default function BulkEdit() {
           )}
 
           {/* Product list */}
-          <div style={{ maxHeight: "520px", overflowY: "auto", border: "1px solid #e1e3e5", borderRadius: "10px" }}>
+          <div style={{ maxHeight: "520px", overflowY: "auto", overflowX: "hidden", border: "1px solid #e1e3e5", borderRadius: "10px" }}>
             {filtered.map((product) => {
               const sel = selectedIds.has(product.id);
               const variants = product.variants?.edges || [];
@@ -1586,9 +1599,9 @@ export default function BulkEdit() {
                 <div key={product.id} style={styles.productRow(sel)} onClick={() => toggleProduct(product.id)}>
                   <input type="checkbox" checked={sel} readOnly style={{ width: "18px", height: "18px", cursor: "pointer", flexShrink: 0 }} />
                   {img ? (
-                    <img src={img} alt="" style={{ width: "44px", height: "44px", borderRadius: "8px", objectFit: "cover", flexShrink: 0, border: "1px solid #e1e3e5" }} />
+                    <img src={img} alt="" style={{ width: "36px", height: "36px", borderRadius: "6px", objectFit: "cover", flexShrink: 0, border: "1px solid #e1e3e5" }} />
                   ) : (
-                    <div style={{ width: "44px", height: "44px", borderRadius: "8px", backgroundColor: "#f1f2f3", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "18px", color: "#babec3" }}>📦</div>
+                    <div style={{ width: "36px", height: "36px", borderRadius: "6px", backgroundColor: "#f1f2f3", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "16px", color: "#babec3" }}>📦</div>
                   )}
                   <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
                     <div style={{ fontWeight: 600, fontSize: "13px", color: "#202223", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{product.title}</div>
@@ -1597,8 +1610,8 @@ export default function BulkEdit() {
                       {product.vendor && <span>· {product.vendor}</span>}
                     </div>
                   </div>
-                  <div style={{ textAlign: "right", flexShrink: 0, minWidth: "70px" }}>
-                    <div style={{ fontWeight: 600, fontSize: "13px", color: "#202223", whiteSpace: "nowrap" }}>{priceDisplay}</div>
+                  <div style={{ textAlign: "right", flexShrink: 0 }}>
+                    <div style={{ fontWeight: 600, fontSize: "12px", color: "#202223", whiteSpace: "nowrap" }}>{priceDisplay}</div>
                     <span style={styles.badge(product.status === "ACTIVE" ? "success" : product.status === "DRAFT" ? "warning" : "default")}>
                       {product.status.charAt(0) + product.status.slice(1).toLowerCase()}
                     </span>
@@ -1631,14 +1644,14 @@ export default function BulkEdit() {
       {step === 2 && (
         <s-section>
           <s-box padding="base">
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-              <div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "8px" }}>
+              <div style={{ minWidth: 0 }}>
                 <s-text variant="headingMd" fontWeight="bold">Configure Changes</s-text>
                 <s-text tone="subdued" variant="bodySm">
                   Editing {selectedIds.size} product{selectedIds.size !== 1 ? "s" : ""} ({totalVariants} variant{totalVariants !== 1 ? "s" : ""})
                 </s-text>
               </div>
-              <button style={styles.secondaryBtn} onClick={() => setStep(1)}>← Change Selection</button>
+              <button style={{ ...styles.secondaryBtn, whiteSpace: "nowrap", flexShrink: 0 }} onClick={() => setStep(1)}>← Change Selection</button>
             </div>
           </s-box>
 
@@ -1665,12 +1678,12 @@ export default function BulkEdit() {
 
           {/* Modifications */}
           <s-box padding="base">
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
-              <div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "12px", flexWrap: "wrap", gap: "8px" }}>
+              <div style={{ minWidth: 0 }}>
                 <div style={{ fontWeight: 600, fontSize: "15px", color: "#202223" }}>Modifications</div>
                 <div style={{ fontSize: "12px", color: "#637381" }}>Add one or more field changes to apply to selected products</div>
               </div>
-              <button onClick={() => { addMod(); setActivePreset(null); }} style={styles.secondaryBtn}>+ Add Modification</button>
+              <button onClick={() => { addMod(); setActivePreset(null); }} style={{ ...styles.secondaryBtn, whiteSpace: "nowrap", flexShrink: 0 }}>+ Add Modification</button>
             </div>
 
             {modifications.length === 0 ? (
@@ -1700,7 +1713,7 @@ export default function BulkEdit() {
                       <button onClick={() => { removeMod(mod.id); setActivePreset(null); }} style={{ border: "none", background: "none", cursor: "pointer", color: "#bf0711", fontSize: "20px", padding: "4px 8px" }}>✕</button>
                     </div>
 
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+                    <div className="mod-grid-2col" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
                       <div>
                         <div style={{ fontSize: "13px", fontWeight: 600, marginBottom: "4px" }}>Field to Edit</div>
                         <select value={mod.field} onChange={(e) => { updateMod(mod.id, "field", e.target.value); setActivePreset(null); }} style={styles.select}>
@@ -1731,7 +1744,7 @@ export default function BulkEdit() {
                       </div>
                     </div>
 
-                    <div style={{ display: "grid", gridTemplateColumns: isFindReplace ? "1fr 1fr" : isNumeric ? "1fr 1fr" : "1fr", gap: "12px", marginTop: "12px" }}>
+                    <div className="mod-grid-2col" style={{ display: "grid", gridTemplateColumns: isFindReplace ? "1fr 1fr" : isNumeric ? "1fr 1fr" : "1fr", gap: "12px", marginTop: "12px" }}>
                       <div>
                         <div style={{ fontSize: "13px", fontWeight: 600, marginBottom: "4px" }}>
                           {isFindReplace ? "Find" : "Value"} {isNumeric && mod.type.includes("percent") ? "(%)" : (mod.field === "price" || mod.field === "compareAtPrice" || mod.field === "cost") ? "($)" : ""}
@@ -1784,24 +1797,24 @@ export default function BulkEdit() {
                 <div style={{ fontWeight: 600, fontSize: "14px", color: "#2c6ecb", marginBottom: "10px" }}>
                   👁 Live Preview — How fields will change
                 </div>
-                <div style={{ borderRadius: "8px", border: "1px solid #e1e3e5", overflow: "hidden" }}>
-                  <div style={{ display: "flex", padding: "8px 12px", backgroundColor: "#f6f6f7", fontSize: "11px", fontWeight: 700, color: "#637381", textTransform: "uppercase", letterSpacing: "0.5px" }}>
-                    <div style={{ flex: 2 }}>Product</div>
-                    <div style={{ flex: 1, textAlign: "center" }}>Field</div>
-                    <div style={{ flex: 2, textAlign: "right" }}>Change</div>
+                <div style={{ borderRadius: "8px", border: "1px solid #e1e3e5", overflow: "hidden", maxWidth: "100%" }}>
+                  <div style={{ display: "flex", padding: "8px 10px", backgroundColor: "#f6f6f7", fontSize: "11px", fontWeight: 700, color: "#637381", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                    <div style={{ flex: 2, minWidth: 0 }}>Product</div>
+                    <div style={{ flex: 1, textAlign: "center", minWidth: 0 }}>Field</div>
+                    <div style={{ flex: 2, textAlign: "right", minWidth: 0 }}>Change</div>
                   </div>
                   {livePreview.map((item, i) => (
-                    <div key={i} style={{ display: "flex", alignItems: "center", padding: "8px 12px", borderBottom: "1px solid #f1f2f3", fontSize: "13px" }}>
-                      <div style={{ flex: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    <div key={i} style={{ display: "flex", alignItems: "center", padding: "8px 10px", borderBottom: "1px solid #f1f2f3", fontSize: "12px" }}>
+                      <div style={{ flex: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
                         <span style={{ fontWeight: 600 }}>{item.title}</span>
                         {item.variant && <span style={{ color: "#637381" }}> — {item.variant}</span>}
                       </div>
-                      <div style={{ flex: 1, textAlign: "center" }}>
+                      <div style={{ flex: 1, textAlign: "center", minWidth: 0 }}>
                         <span style={styles.badge("default")}>{getFieldDef(item.field)?.label || item.field}</span>
                       </div>
-                      <div style={{ flex: 2, textAlign: "right" }}>
+                      <div style={{ flex: 2, textAlign: "right", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         <span style={{ textDecoration: "line-through", color: "#8c9196" }}>{formatValue(item.field, item.oldValue)}</span>
-                        <span style={{ color: "#8c9196", margin: "0 8px" }}>→</span>
+                        <span style={{ color: "#8c9196", margin: "0 4px" }}>→</span>
                         <span style={{ fontWeight: 700, color: "#202223" }}>{formatValue(item.field, item.newValue)}</span>
                       </div>
                     </div>
@@ -1813,13 +1826,13 @@ export default function BulkEdit() {
 
           {/* Navigation */}
           <s-box padding="base">
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <button style={styles.secondaryBtn} onClick={() => setStep(1)}>← Back to Selection</button>
-              <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" }}>
+              <button style={styles.secondaryBtn} onClick={() => setStep(1)}>← Back</button>
+              <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
                 {!canPreview && modifications.length > 0 && (
                   <span style={{ fontSize: "13px", color: "#d72c0d" }}>Enter a value for all modifications</span>
                 )}
-                <button style={styles.primaryBtn(canPreview)} onClick={() => canPreview && setStep(3)} disabled={!canPreview}>
+                <button style={{ ...styles.primaryBtn(canPreview), whiteSpace: "nowrap" }} onClick={() => canPreview && setStep(3)} disabled={!canPreview}>
                   Review Changes →
                 </button>
               </div>
@@ -1917,11 +1930,11 @@ export default function BulkEdit() {
           {/* Full change table */}
           <s-box padding="base">
             <div style={{ fontWeight: 600, fontSize: "14px", marginBottom: "8px" }}>All Changes ({changes.length})</div>
-            <div style={{ maxHeight: "400px", overflowY: "auto", borderRadius: "10px", border: "1px solid #e1e3e5" }}>
-              <div style={{ display: "flex", padding: "8px 12px", backgroundColor: "#f6f6f7", fontSize: "11px", fontWeight: 700, color: "#637381", textTransform: "uppercase", letterSpacing: "0.5px", position: "sticky", top: 0, zIndex: 1 }}>
-                <div style={{ flex: 2 }}>Product / Variant</div>
-                <div style={{ flex: 0.5, textAlign: "center" }}>Field</div>
-                <div style={{ flex: 2, textAlign: "right" }}>Update</div>
+            <div style={{ maxHeight: "400px", overflowY: "auto", overflowX: "hidden", borderRadius: "10px", border: "1px solid #e1e3e5", maxWidth: "100%" }}>
+              <div style={{ display: "flex", padding: "8px 10px", backgroundColor: "#f6f6f7", fontSize: "11px", fontWeight: 700, color: "#637381", textTransform: "uppercase", letterSpacing: "0.5px", position: "sticky", top: 0, zIndex: 1 }}>
+                <div style={{ flex: 2, minWidth: 0 }}>Product / Variant</div>
+                <div style={{ flex: 0.5, textAlign: "center", minWidth: 0 }}>Field</div>
+                <div style={{ flex: 2, textAlign: "right", minWidth: 0 }}>Update</div>
               </div>
               {changes.length === 0 ? (
                 <div style={{ padding: "24px", textAlign: "center", color: "#637381", fontSize: "14px" }}>
@@ -1931,19 +1944,19 @@ export default function BulkEdit() {
                 </div>
               ) : (
                 changes.map((c, i) => (
-                  <div key={i} style={{ display: "flex", alignItems: "center", padding: "10px 12px", borderBottom: "1px solid #f1f2f3", fontSize: "13px", backgroundColor: "white" }}>
-                    <div style={{ flex: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  <div key={i} style={{ display: "flex", alignItems: "center", padding: "8px 10px", borderBottom: "1px solid #f1f2f3", fontSize: "12px", backgroundColor: "white" }}>
+                    <div style={{ flex: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
                       <span style={{ fontWeight: 600 }}>{c.productTitle}</span>
                       {c.variantTitle && c.variantTitle !== "Default Title" && (
                         <span style={{ color: "#637381" }}> — {c.variantTitle}</span>
                       )}
                     </div>
-                    <div style={{ flex: 0.5, textAlign: "center" }}>
+                    <div style={{ flex: 0.5, textAlign: "center", minWidth: 0 }}>
                       <span style={styles.badge("default")}>{getFieldDef(c.field)?.label || c.field}</span>
                     </div>
-                    <div style={{ flex: 2, textAlign: "right" }}>
+                    <div style={{ flex: 2, textAlign: "right", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       <span style={{ textDecoration: "line-through", color: "#8c9196" }}>{formatValue(c.field, c.oldValue)}</span>
-                      <span style={{ color: "#8c9196", margin: "0 8px" }}>→</span>
+                      <span style={{ color: "#8c9196", margin: "0 4px" }}>→</span>
                       <span style={{ fontWeight: 700, color: "#202223" }}>{formatValue(c.field, c.newValue)}</span>
                     </div>
                   </div>
@@ -2003,8 +2016,8 @@ export default function BulkEdit() {
 
           {/* Navigation */}
           <s-box padding="base">
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <button style={styles.secondaryBtn} onClick={() => setStep(2)} disabled={!!executionProgress}>← Back to Configure</button>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" }}>
+              <button style={{ ...styles.secondaryBtn, whiteSpace: "nowrap" }} onClick={() => setStep(2)} disabled={!!executionProgress}>← Back to Configure</button>
               <button
                 style={{ ...styles.primaryBtn(changes.length > 0 && !executionProgress), backgroundColor: changes.length > 0 && !executionProgress ? "#008060" : "#c4cdd5" }}
                 onClick={handleExecute}
