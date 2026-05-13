@@ -173,6 +173,16 @@ export const loader = async ({ request }) => {
   const shop = session.shop;
   const storeHandle = shop.replace(".myshopify.com", "");
 
+  // Detect if this is a development store (for showing test mode panel)
+  let isDevStore = false;
+  try {
+    const devCheckRes = await admin.graphql(`{ shop { plan { partnerDevelopment } } }`);
+    const devCheckData = await devCheckRes.json();
+    isDevStore = devCheckData?.data?.shop?.plan?.partnerDevelopment === true;
+  } catch (e) {
+    console.error("[Billing] Failed to check dev store status:", e.message);
+  }
+
   // 1. Query Shopify GraphQL for current subscription
   // IMPORTANT: When upgrading, multiple subscriptions may coexist briefly.
   // We pick the HIGHEST-TIER plan among all active/accepted subscriptions.
@@ -283,7 +293,7 @@ export const loader = async ({ request }) => {
     promoActive,
     promoExpiresAt: promoExpiresAt ? new Date(promoExpiresAt).toISOString() : null,
     promoCode: shopPlan.promoCode || null,
-    isDev: process.env.NODE_ENV !== "production",
+    isDev: isDevStore,
   };
 };
 
@@ -620,7 +630,7 @@ export default function Billing() {
                     </span>
                   </div>
                   <div style={{ fontSize: "11px", color: "#b98900", marginTop: "8px" }}>
-                    Test mode only appears in development. It will not show in production.
+                    Development store detected. Plan buttons switch instantly without Shopify billing. This panel won't appear on live stores.
                   </div>
                 </div>
               )}
@@ -766,6 +776,27 @@ export default function Billing() {
                       }}>
                         Current Plan
                       </div>
+                    ) : isDev ? (
+                      <button
+                        onClick={() => handleTestSwitch(plan.key)}
+                        disabled={isSubmitting}
+                        style={{
+                          display: "block",
+                          width: "100%",
+                          padding: "12px 24px",
+                          borderRadius: "8px",
+                          border: isUpgrade ? "none" : "1px solid #c4cdd5",
+                          backgroundColor: isUpgrade ? "#2c6ecb" : "white",
+                          color: isUpgrade ? "white" : "#637381",
+                          fontWeight: 700,
+                          fontSize: "14px",
+                          cursor: isSubmitting ? "default" : "pointer",
+                          transition: "all 0.15s",
+                          opacity: isSubmitting ? 0.6 : 1,
+                        }}
+                      >
+                        {isUpgrade ? `Upgrade to ${plan.name}` : `Switch to ${plan.name}`}
+                      </button>
                     ) : (
                       <a
                         href={planSelectionUrl}
