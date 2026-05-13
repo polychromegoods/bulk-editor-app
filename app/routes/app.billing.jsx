@@ -228,9 +228,10 @@ export const loader = async ({ request }) => {
   // 2. Sync with our database
   let shopPlan = await prisma.shopPlan.findUnique({ where: { shop } });
   if (!shopPlan) {
-    shopPlan = await prisma.shopPlan.create({ data: { shop, plan: shopifyPlan } });
-  } else if (shopPlan.plan !== shopifyPlan && shopifyPlan !== "free") {
+    shopPlan = await prisma.shopPlan.create({ data: { shop, plan: isDevStore ? "free" : shopifyPlan } });
+  } else if (!isDevStore && shopPlan.plan !== shopifyPlan && shopifyPlan !== "free") {
     // Shopify is the source of truth — sync if different (unless promo is active)
+    // Skip on dev stores where plan is managed directly via test-switch
     if (!shopPlan.promoExpiresAt || new Date(shopPlan.promoExpiresAt) < new Date()) {
       shopPlan = await prisma.shopPlan.update({
         where: { shop },
@@ -254,12 +255,13 @@ export const loader = async ({ request }) => {
         });
       }
     } else {
-      // Promo expired — clear promo fields and revert to Shopify plan
-      console.log(`[Promo] Promo expired for ${shop}, reverting to Shopify plan: ${shopifyPlan}`);
+      // Promo expired — clear promo fields and revert to Shopify plan (or "free" on dev stores)
+      const revertPlan = isDevStore ? "free" : shopifyPlan;
+      console.log(`[Promo] Promo expired for ${shop}, reverting to plan: ${revertPlan}`);
       shopPlan = await prisma.shopPlan.update({
         where: { shop },
         data: {
-          plan: shopifyPlan,
+          plan: revertPlan,
           promoCode: null,
           promoPlan: null,
           promoExpiresAt: null,

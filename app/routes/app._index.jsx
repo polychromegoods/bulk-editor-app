@@ -95,11 +95,23 @@ export const loader = async ({ request }) => {
     shopPlan = await prisma.shopPlan.create({ data: { shop } });
   }
 
+  // ─── Detect if this is a development store ───
+  let isDevStore = false;
+  try {
+    const devCheckRes = await admin.graphql(`{ shop { plan { partnerDevelopment } } }`);
+    const devCheckData = await devCheckRes.json();
+    isDevStore = devCheckData?.data?.shop?.plan?.partnerDevelopment === true;
+  } catch (e) {
+    // Silently continue — assume not a dev store
+  }
+
   // ─── Sync plan from Shopify (always, but especially important when charge_id is present) ───
   // Shopify Managed Pricing redirects here with ?charge_id=... after plan approval.
   // We query Shopify GraphQL to get the real plan and sync our database.
   // IMPORTANT: When upgrading, multiple subscriptions may coexist briefly (old ACTIVE + new ACCEPTED).
   // We must pick the HIGHEST-TIER plan among all active/accepted subscriptions.
+  // NOTE: On dev stores, skip sync because there's no real Shopify subscription —
+  // plan is managed directly in the database via test-switch.
   let shopifyPlan = "free";
   try {
     const response = await admin.graphql(CURRENT_SUBSCRIPTION_QUERY);
@@ -133,8 +145,9 @@ export const loader = async ({ request }) => {
 
   // Sync database with Shopify's plan (Shopify is source of truth)
   // Skip sync if promo is active and not expired
+  // Skip sync on dev stores (no real Shopify subscription exists — plan is managed via test-switch)
   const promoActive = shopPlan.promoCode && shopPlan.promoExpiresAt && new Date(shopPlan.promoExpiresAt) > new Date();
-  if (!promoActive && shopPlan.plan !== shopifyPlan) {
+  if (!isDevStore && !promoActive && shopPlan.plan !== shopifyPlan) {
     console.log(`[Dashboard] Syncing plan for ${shop}: DB=${shopPlan.plan} → Shopify=${shopifyPlan}`);
     shopPlan = await prisma.shopPlan.update({
       where: { shop },
@@ -144,12 +157,14 @@ export const loader = async ({ request }) => {
         ...(shopifyPlan !== "free" ? { trialUsed: true } : {}),
       },
     });
-  } else if (chargeId && shopPlan.plan === shopifyPlan) {
+  } else if (!isDevStore && chargeId && shopPlan.plan === shopifyPlan) {
     // Update chargeId even if plan matches
     shopPlan = await prisma.shopPlan.update({
       where: { shop },
       data: { chargeId },
     });
+  } else if (isDevStore) {
+    console.log(`[Dashboard] Dev store ${shop}: skipping Shopify plan sync (DB plan=${shopPlan.plan})`);
   }
 
   // Reset monthly edits if new month
