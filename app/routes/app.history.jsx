@@ -50,7 +50,10 @@ export const loader = async ({ request }) => {
         COALESCE(SUM(CASE WHEN CAST("newPrice" AS DOUBLE PRECISION) > CAST("oldPrice" AS DOUBLE PRECISION) THEN 1 ELSE 0 END), 0) as increase_count,
         COALESCE(SUM(CASE WHEN CAST("newPrice" AS DOUBLE PRECISION) < CAST("oldPrice" AS DOUBLE PRECISION) THEN CAST("oldPrice" AS DOUBLE PRECISION) - CAST("newPrice" AS DOUBLE PRECISION) ELSE 0 END), 0) as total_saved,
         COALESCE(SUM(CASE WHEN CAST("newPrice" AS DOUBLE PRECISION) > CAST("oldPrice" AS DOUBLE PRECISION) THEN CAST("newPrice" AS DOUBLE PRECISION) - CAST("oldPrice" AS DOUBLE PRECISION) ELSE 0 END), 0) as total_increased
-      FROM "PriceHistory" WHERE shop = $1`,
+      FROM "PriceHistory" WHERE shop = $1
+        AND "changeType" IN ('price', 'compareAtPrice', 'automation', 'automation_compare')
+        AND "oldPrice" ~ '^[0-9]+(\\.[0-9]+)?$'
+        AND "newPrice" ~ '^[0-9]+(\\.[0-9]+)?$'`,
       shop
     );
     if (statsResult && statsResult.length > 0) {

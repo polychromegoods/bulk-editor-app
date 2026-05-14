@@ -354,7 +354,7 @@ export const action = async ({ request }) => {
           shop: session.shop,
           name: editName,
           status: errorCount === 0 ? "completed" : "partial",
-          productCount: successCount,
+          productCount: Object.keys(changesByProduct).length,
           changes: JSON.stringify(changes.slice(0, 50)),
         },
       });
@@ -1628,11 +1628,16 @@ export default function BulkEdit() {
           </div>
 
           <s-box padding="base">
+            {productsPerEdit !== Infinity && selectedIds.size > productsPerEdit && (
+              <div style={{ padding: "10px 14px", backgroundColor: "#fff4e5", border: "1px solid #f5d680", borderRadius: "8px", marginBottom: "10px", fontSize: "13px", color: "#916a00" }}>
+                ⚠️ Free plan allows up to <strong>{productsPerEdit}</strong> products per edit. You have <strong>{selectedIds.size}</strong> selected. Please deselect some products or <a href="/app/billing" style={{ color: "#2c6ecb", fontWeight: 600 }}>upgrade your plan</a> for unlimited edits.
+              </div>
+            )}
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" }}>
               <div style={{ fontSize: "13px", color: "#637381" }}>
                 {selectedIds.size > 0 ? `Ready to configure ${selectedIds.size} product${selectedIds.size !== 1 ? "s" : ""}` : "Select at least one product to continue"}
               </div>
-              <button style={{ ...styles.primaryBtn(canConfigure), whiteSpace: "nowrap" }} onClick={() => canConfigure && setStep(2)} disabled={!canConfigure}>
+              <button style={{ ...styles.primaryBtn(canConfigure && !(productsPerEdit !== Infinity && selectedIds.size > productsPerEdit)), whiteSpace: "nowrap" }} onClick={() => canConfigure && !(productsPerEdit !== Infinity && selectedIds.size > productsPerEdit) && setStep(2)} disabled={!canConfigure || (productsPerEdit !== Infinity && selectedIds.size > productsPerEdit)}>
                 Continue to Configure →
               </button>
             </div>
@@ -1899,8 +1904,8 @@ export default function BulkEdit() {
                   <div style={{ fontSize: "12px", color: "#637381", marginTop: "4px" }}>Total Changes</div>
                 </div>
                 <div style={styles.summaryCard("#2c6ecb")}>
-                  <div style={{ fontSize: "28px", fontWeight: 700 }}>{selected.length}</div>
-                  <div style={{ fontSize: "12px", color: "#637381", marginTop: "4px" }}>Products</div>
+                  <div style={{ fontSize: "28px", fontWeight: 700 }}>{new Set(changes.map(c => c.productId)).size}</div>
+                  <div style={{ fontSize: "12px", color: "#637381", marginTop: "4px" }}>Products Affected</div>
                 </div>
                 <div style={styles.summaryCard("#2c6ecb")}>
                   <div style={{ fontSize: "28px", fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%" }} title={priceImpact.netChange}>
@@ -2008,7 +2013,7 @@ export default function BulkEdit() {
               <div style={{ padding: "14px 16px", backgroundColor: "#fef8e8", border: "1px solid #f5d680", borderRadius: "10px" }}>
                 <div style={{ fontWeight: 700, color: "#916a00", marginBottom: "4px" }}>Before you execute</div>
                 <div style={{ fontSize: "13px", color: "#4a3800" }}>
-                  This will update <strong>{changes.length}</strong> field{changes.length !== 1 ? "s" : ""} across <strong>{selected.length}</strong> product{selected.length !== 1 ? "s" : ""}. Changes take effect immediately. You can undo from the results page.
+                  This will update <strong>{changes.length}</strong> field{changes.length !== 1 ? "s" : ""} across <strong>{new Set(changes.map(c => c.productId)).size}</strong> product{new Set(changes.map(c => c.productId)).size !== 1 ? "s" : ""}. Changes take effect immediately. You can undo from the results page.
                 </div>
               </div>
             </s-box>
