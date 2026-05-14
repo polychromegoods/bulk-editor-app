@@ -322,6 +322,7 @@ export default function Automations() {
   const [filterRules, setFilterRules] = useState([]);
   // Step 2: Modifications
   const [ruleName, setRuleName] = useState("");
+  const [ruleNameTouched, setRuleNameTouched] = useState(false);
   const [modifications, setModifications] = useState([]);
 
   const isSubmitting = fetcher.state !== "idle";
@@ -335,6 +336,7 @@ export default function Automations() {
       setFilterRules([]);
       setModifications([]);
       setRuleName("");
+      setRuleNameTouched(false);
       shopify.toast.show("Automation rule created!");
     }
     if (actionData?.error) {
@@ -585,7 +587,7 @@ export default function Automations() {
                 </div>
 
                 <div style={{ display: "flex", gap: "8px", marginTop: "16px", justifyContent: "flex-end" }}>
-                  <button style={styles.secondaryBtn} onClick={() => { setShowCreator(false); setStep(1); setFilterRules([]); setModifications([]); setRuleName(""); }}>Cancel</button>
+                  <button style={styles.secondaryBtn} onClick={() => { setShowCreator(false); setStep(1); setFilterRules([]); setModifications([]); setRuleName(""); setRuleNameTouched(false); }}>Cancel</button>
                   <button style={styles.primaryBtn(filterRules.length > 0)} onClick={() => filterRules.length > 0 && setStep(2)} disabled={filterRules.length === 0}>
                     Next: Set Modifications →
                   </button>
@@ -690,8 +692,11 @@ export default function Automations() {
 
                 {/* Rule name */}
                 <div style={{ marginBottom: "20px" }}>
-                  <label style={{ fontSize: "13px", fontWeight: 600, color: "#202223", marginBottom: "6px", display: "block" }}>Rule Name</label>
-                  <input style={styles.input} type="text" placeholder="e.g., Tag 'sale' → 20% off" value={ruleName} onChange={(e) => setRuleName(e.target.value)} />
+                  <label style={{ fontSize: "13px", fontWeight: 600, color: "#202223", marginBottom: "6px", display: "block" }}>Rule Name <span style={{ color: "#d72c0d" }}>*</span></label>
+                  <input style={{ ...styles.input, ...(ruleNameTouched && ruleName.trim() === "" ? { borderColor: "#d72c0d" } : {}) }} type="text" placeholder="e.g., Tag 'sale' → 20% off" value={ruleName} onChange={(e) => setRuleName(e.target.value)} onBlur={() => setRuleNameTouched(true)} />
+                  {ruleNameTouched && ruleName.trim() === "" && (
+                    <div style={{ fontSize: "12px", color: "#d72c0d", marginTop: "4px" }}>Rule name is required to save the automation.</div>
+                  )}
                 </div>
 
                 {/* Summary */}
@@ -732,7 +737,7 @@ export default function Automations() {
 
                 <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
                   <button style={styles.secondaryBtn} onClick={() => setStep(2)}>← Back</button>
-                  <button style={styles.secondaryBtn} onClick={() => { setShowCreator(false); setStep(1); setFilterRules([]); setModifications([]); setRuleName(""); }}>Cancel</button>
+                  <button style={styles.secondaryBtn} onClick={() => { setShowCreator(false); setStep(1); setFilterRules([]); setModifications([]); setRuleName(""); setRuleNameTouched(false); }}>Cancel</button>
                   <button style={styles.primaryBtn(!!ruleName.trim())} onClick={handleSaveRule} disabled={!ruleName.trim() || isSubmitting}>
                     {isSubmitting ? "Saving..." : "💾 Save Automation Rule"}
                   </button>
