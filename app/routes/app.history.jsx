@@ -40,10 +40,11 @@ export const loader = async ({ request }) => {
 
   const totalPages = Math.ceil(totalCount / pageSize);
 
-  // Compute summary stats
-  let stats = { totalChanges: 0, decreaseCount: 0, increaseCount: 0, totalSaved: "0.00", totalIncreased: "0.00" };
+  // Compute summary stats (exclude failed entries from price stats)
+  let stats = { totalChanges: 0, decreaseCount: 0, increaseCount: 0, totalSaved: "0.00", totalIncreased: "0.00", failedCount: 0 };
   try {
     const totalChanges = await prisma.priceHistory.count({ where: { shop } });
+    const failedCount = await prisma.priceHistory.count({ where: { shop, changeSource: "bulk_edit_failed" } });
     const statsResult = await prisma.$queryRawUnsafe(
       `SELECT 
         COALESCE(SUM(CASE WHEN CAST("newPrice" AS DOUBLE PRECISION) < CAST("oldPrice" AS DOUBLE PRECISION) THEN 1 ELSE 0 END), 0) as decrease_count,
@@ -51,6 +52,7 @@ export const loader = async ({ request }) => {
         COALESCE(SUM(CASE WHEN CAST("newPrice" AS DOUBLE PRECISION) < CAST("oldPrice" AS DOUBLE PRECISION) THEN CAST("oldPrice" AS DOUBLE PRECISION) - CAST("newPrice" AS DOUBLE PRECISION) ELSE 0 END), 0) as total_saved,
         COALESCE(SUM(CASE WHEN CAST("newPrice" AS DOUBLE PRECISION) > CAST("oldPrice" AS DOUBLE PRECISION) THEN CAST("newPrice" AS DOUBLE PRECISION) - CAST("oldPrice" AS DOUBLE PRECISION) ELSE 0 END), 0) as total_increased
       FROM "PriceHistory" WHERE shop = $1
+        AND "changeSource" != 'bulk_edit_failed'
         AND "changeType" IN ('price', 'compareAtPrice', 'automation', 'automation_compare')
         AND "oldPrice" ~ '^[0-9]+(\\.[0-9]+)?$'
         AND "newPrice" ~ '^[0-9]+(\\.[0-9]+)?$'`,
@@ -64,6 +66,7 @@ export const loader = async ({ request }) => {
         increaseCount: Number(row.increase_count),
         totalSaved: Number(row.total_saved).toFixed(2),
         totalIncreased: Number(row.total_increased).toFixed(2),
+        failedCount,
       };
     }
   } catch (err) {
@@ -98,9 +101,9 @@ export const action = async ({ request }) => {
     const bulkEditId = formData.get("bulkEditId");
     if (!bulkEditId) return { success: false, error: "No bulk edit ID provided" };
 
-    // Get all history records for this run
+    // Get all history records for this run — exclude failed entries (can't undo something that never applied)
     const records = await prisma.priceHistory.findMany({
-      where: { shop, bulkEditId, changeSource: { not: "manual_revert" } },
+      where: { shop, bulkEditId, changeSource: { notIn: ["manual_revert", "bulk_edit_failed"] } },
       orderBy: { createdAt: "desc" },
     });
 
@@ -249,7 +252,7 @@ export const action = async ({ request }) => {
   return { error: "Unknown intent" };
 };
 
-export default function History() {
+export default function HistoryPage() {
   const { history, totalCount, page, totalPages, search, source, bulkEdits, stats } = useLoaderData();
   const fetcher = useFetcher();
   const navigate = useNavigate();
@@ -422,6 +425,12 @@ export default function History() {
               <div style={{ fontSize: "20px", fontWeight: 700, color: "#d72c0d" }}>{stats.increaseCount.toLocaleString()}</div>
               <div style={{ fontSize: "11px", color: "#637381" }}>Increases</div>
             </div>
+            {stats.failedCount > 0 && (
+              <div style={{ padding: "12px", border: "1px solid #fef3f2", borderRadius: "10px", textAlign: "center", borderTop: "3px solid #b71c1c", backgroundColor: "#fef3f2" }}>
+                <div style={{ fontSize: "20px", fontWeight: 700, color: "#b71c1c" }}>{stats.failedCount.toLocaleString()}</div>
+                <div style={{ fontSize: "11px", color: "#b71c1c" }}>Failed</div>
+              </div>
+            )}
             <div style={{ padding: "12px", border: "1px solid #e1e3e5", borderRadius: "10px", textAlign: "center", borderTop: "3px solid #637381" }}>
               <div style={{ fontSize: "20px", fontWeight: 700, color: "#202223" }}>{bulkEdits.length}</div>
               <div style={{ fontSize: "11px", color: "#637381" }}>Bulk Edits</div>
@@ -451,6 +460,7 @@ export default function History() {
           >
             <option value="">All Sources</option>
             <option value="bulk_edit">Bulk Edit</option>
+            <option value="bulk_edit_failed">Failed</option>
             <option value="manual_revert">Manual Revert</option>
             <option value="automation">Automation</option>
           </select>
@@ -487,11 +497,17 @@ export default function History() {
           <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
             {groupedHistory.map((run) => {
               const isExpanded = expandedRuns.has(run.id);
-              const changeCount = run.entries.length;
+              const successEntries = run.entries.filter(e => e.changeSource !== "bulk_edit_failed");
+              const failedEntries = run.entries.filter(e => e.changeSource === "bulk_edit_failed");
+              const changeCount = successEntries.length;
+              const failedCount = failedEntries.length;
               const isRevert = run.source === "manual_revert";
+              const isFailed = run.source === "bulk_edit_failed";
+              const hasFailures = failedCount > 0;
               const uniqueProducts = [...new Set(run.entries.map(e => e.productTitle))];
               const priceFields = ["price", "compareAtPrice", "cost", "automation", "automation_compare"];
-              const netChange = run.entries.reduce((sum, e) => {
+              // Only compute net change from successful entries
+              const netChange = successEntries.reduce((sum, e) => {
                 if (!priceFields.includes(e.changeType)) return sum;
                 const oldVal = parseFloat(e.oldPrice);
                 const newVal = parseFloat(e.newPrice);
@@ -499,8 +515,11 @@ export default function History() {
                 return sum + (newVal - oldVal);
               }, 0);
 
+              // Determine border color based on run status
+              const borderColor = isFailed ? "#d72c0d" : hasFailures ? "#ffc453" : "#e1e3e5";
+
               return (
-                <div key={run.id} style={{ border: "1px solid #e1e3e5", borderRadius: "12px", overflow: "hidden", backgroundColor: "white" }}>
+                <div key={run.id} style={{ border: `1px solid ${borderColor}`, borderRadius: "12px", overflow: "hidden", backgroundColor: "white", borderLeft: isFailed ? "4px solid #d72c0d" : hasFailures ? "4px solid #ffc453" : undefined }}>
                   {/* Run header - always visible */}
                   <div
                     style={{ padding: "12px 16px", cursor: "pointer", backgroundColor: isExpanded ? "#f9fafb" : "white", transition: "background-color 0.15s" }}
@@ -511,11 +530,18 @@ export default function History() {
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                           <span style={{ fontWeight: 700, fontSize: "14px", color: "#202223" }}>{run.name}</span>
-                          <span style={badgeStyle(isRevert ? "warning" : "success")}>
-                            {changeCount} change{changeCount !== 1 ? "s" : ""}
-                          </span>
-                          <span style={badgeStyle(isRevert ? "warning" : "default")}>
-                            {run.source.replace(/_/g, " ")}
+                          {changeCount > 0 && (
+                            <span style={badgeStyle(isRevert ? "warning" : "success")}>
+                              {changeCount} change{changeCount !== 1 ? "s" : ""}
+                            </span>
+                          )}
+                          {failedCount > 0 && (
+                            <span style={badgeStyle("critical")}>
+                              {failedCount} failed
+                            </span>
+                          )}
+                          <span style={badgeStyle(isRevert ? "warning" : isFailed ? "critical" : "default")}>
+                            {run.source === "bulk_edit_failed" ? "failed" : run.source.replace(/_/g, " ")}
                           </span>
                         </div>
                         <div style={{ fontSize: "12px", color: "#637381", marginTop: "2px" }}>
@@ -527,9 +553,9 @@ export default function History() {
                           )}
                         </div>
                       </div>
-                      {/* Action buttons */}
+                      {/* Action buttons — hide for fully-failed runs (nothing to undo) */}
                       <div style={{ display: "flex", gap: "6px", flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
-                        {!isRevert && run.entries.length > 0 && run.entries[0].bulkEditId && (
+                        {!isRevert && !isFailed && successEntries.length > 0 && run.entries[0].bulkEditId && (
                           <>
                             <button
                               onClick={() => handleCloneRun(run.entries[0].bulkEditId)}
@@ -561,29 +587,52 @@ export default function History() {
                             <tr style={{ backgroundColor: "#f6f6f7" }}>
                               <th style={{ padding: "8px 12px", textAlign: "left", fontWeight: 600, color: "#637381", fontSize: "11px", textTransform: "uppercase" }}>Product</th>
                               <th style={{ padding: "8px 12px", textAlign: "left", fontWeight: 600, color: "#637381", fontSize: "11px", textTransform: "uppercase" }}>Variant</th>
+                              <th style={{ padding: "8px 12px", textAlign: "left", fontWeight: 600, color: "#637381", fontSize: "11px", textTransform: "uppercase" }}>Field</th>
                               <th style={{ padding: "8px 12px", textAlign: "right", fontWeight: 600, color: "#637381", fontSize: "11px", textTransform: "uppercase" }}>Old</th>
                               <th style={{ padding: "8px 12px", textAlign: "right", fontWeight: 600, color: "#637381", fontSize: "11px", textTransform: "uppercase" }}>New</th>
-                              <th style={{ padding: "8px 12px", textAlign: "right", fontWeight: 600, color: "#637381", fontSize: "11px", textTransform: "uppercase" }}>Change</th>
+                              <th style={{ padding: "8px 12px", textAlign: "right", fontWeight: 600, color: "#637381", fontSize: "11px", textTransform: "uppercase" }}>Status</th>
                             </tr>
                           </thead>
                           <tbody>
                             {run.entries.map((entry) => {
+                              const isFail = entry.changeSource === "bulk_edit_failed";
                               const oldPrice = parseFloat(entry.oldPrice);
                               const newPrice = parseFloat(entry.newPrice);
                               const diff = newPrice - oldPrice;
-                              const pctChange = oldPrice > 0 ? ((diff / oldPrice) * 100).toFixed(1) : "N/A";
+                              const isNumeric = !isNaN(oldPrice) && !isNaN(newPrice);
                               return (
-                                <tr key={entry.id} style={{ borderBottom: "1px solid #f1f2f3" }}>
+                                <tr key={entry.id} style={{ borderBottom: "1px solid #f1f2f3", backgroundColor: isFail ? "#fef3f2" : "white" }}>
                                   <td style={{ padding: "8px 12px", fontWeight: 600, maxWidth: "150px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={entry.productTitle}>
                                     {entry.productTitle}
                                   </td>
                                   <td style={{ padding: "8px 12px", color: "#637381" }}>
                                     {entry.variantTitle || "Default"}
                                   </td>
-                                  <td style={{ padding: "8px 12px", textAlign: "right" }}>{formatPrice(entry.oldPrice)}</td>
-                                  <td style={{ padding: "8px 12px", textAlign: "right", fontWeight: 600 }}>{formatPrice(entry.newPrice)}</td>
-                                  <td style={{ padding: "8px 12px", textAlign: "right", color: diff < 0 ? "#d72c0d" : diff > 0 ? "#1a7f37" : "#637381", fontWeight: 600 }}>
-                                    {formatDiff(diff)} ({pctChange}%)
+                                  <td style={{ padding: "8px 12px", color: "#637381", fontSize: "12px" }}>
+                                    {entry.changeType}
+                                  </td>
+                                  <td style={{ padding: "8px 12px", textAlign: "right" }}>
+                                    {formatPrice(entry.oldPrice)}
+                                  </td>
+                                  <td style={{ padding: "8px 12px", textAlign: "right", fontWeight: 600, color: isFail ? "#d72c0d" : undefined }}>
+                                    {isFail ? (
+                                      <span title={entry.newPrice} style={{ fontSize: "12px", maxWidth: "180px", display: "inline-block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                        {entry.newPrice}
+                                      </span>
+                                    ) : (
+                                      formatPrice(entry.newPrice)
+                                    )}
+                                  </td>
+                                  <td style={{ padding: "8px 12px", textAlign: "right" }}>
+                                    {isFail ? (
+                                      <span style={{ ...badgeStyle("critical"), fontSize: "10px" }}>Failed</span>
+                                    ) : isNumeric ? (
+                                      <span style={{ color: diff < 0 ? "#d72c0d" : diff > 0 ? "#1a7f37" : "#637381", fontWeight: 600 }}>
+                                        {formatDiff(diff)}
+                                      </span>
+                                    ) : (
+                                      <span style={{ ...badgeStyle("success"), fontSize: "10px" }}>Applied</span>
+                                    )}
                                   </td>
                                 </tr>
                               );

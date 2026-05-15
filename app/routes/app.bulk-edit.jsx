@@ -265,6 +265,20 @@ export const action = async ({ request }) => {
           if (userErrors.length > 0) {
             errorCount += productLevelChanges.length;
             errors.push({ product: productChanges[0]?.productTitle, errors: userErrors.map(e => e.message) });
+            // Record failed changes in history so they appear in the History page
+            for (const change of productLevelChanges) {
+              historyRecords.push({
+                shop: session.shop,
+                productId: change.productId,
+                variantId: change.variantId || productId,
+                productTitle: change.productTitle,
+                variantTitle: change.variantTitle || null,
+                oldPrice: change.oldValue,
+                newPrice: userErrors.map(e => e.message).join("; "),
+                changeType: change.field,
+                changeSource: "bulk_edit_failed",
+              });
+            }
           } else {
             successCount += productLevelChanges.length;
             for (const change of productLevelChanges) {
@@ -323,6 +337,20 @@ export const action = async ({ request }) => {
           if (userErrors.length > 0) {
             errorCount += variantLevelChanges.length;
             errors.push({ product: productChanges[0]?.productTitle, errors: userErrors.map(e => e.message) });
+            // Record failed changes in history so they appear in the History page
+            for (const change of variantLevelChanges) {
+              historyRecords.push({
+                shop: session.shop,
+                productId: change.productId,
+                variantId: change.variantId,
+                productTitle: change.productTitle,
+                variantTitle: change.variantTitle || null,
+                oldPrice: change.oldValue,
+                newPrice: userErrors.map(e => e.message).join("; "),
+                changeType: change.field,
+                changeSource: "bulk_edit_failed",
+              });
+            }
           } else {
             successCount += variantLevelChanges.length;
             for (const change of variantLevelChanges) {
@@ -343,6 +371,20 @@ export const action = async ({ request }) => {
       } catch (err) {
         errorCount += productChanges.length;
         errors.push({ product: productChanges[0]?.productTitle, errors: [err.message || "Unknown error"] });
+        // Record failed changes in history for network/exception errors
+        for (const change of productChanges) {
+          historyRecords.push({
+            shop: session.shop,
+            productId: change.productId,
+            variantId: change.variantId || change.productId,
+            productTitle: change.productTitle,
+            variantTitle: change.variantTitle || null,
+            oldPrice: change.oldValue,
+            newPrice: err.message || "Unknown error",
+            changeType: change.field,
+            changeSource: "bulk_edit_failed",
+          });
+        }
       }
     }
 
