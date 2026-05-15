@@ -413,7 +413,7 @@ export default function Billing() {
   const [showTestMode, setShowTestMode] = useState(false);
   const [promoInput, setPromoInput] = useState("");
   const [showPromoInput, setShowPromoInput] = useState(false);
-  const [displayInterval, setDisplayInterval] = useState("monthly");
+  const [displayInterval, setDisplayInterval] = useState(currentInterval || "monthly");
 
   const isSubmitting = fetcher.state !== "idle";
 

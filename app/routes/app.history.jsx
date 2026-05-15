@@ -118,11 +118,88 @@ export const action = async ({ request }) => {
 
     for (const [productId, recs] of Object.entries(byProduct)) {
       try {
-        const variants = recs
-          .filter(r => r.variantId && r.variantId !== productId)
-          .map(r => ({ id: r.variantId, price: r.oldPrice }));
+        // Separate product-level and variant-level changes
+        const productLevelFields = ["title", "vendor", "productType", "status", "tags", "templateSuffix"];
+        const variantLevelFields = ["price", "compareAtPrice", "sku", "barcode", "weight", "taxable", "cost"];
+        const productLevelRecs = recs.filter(r => productLevelFields.includes(r.changeType));
+        const variantLevelRecs = recs.filter(r => variantLevelFields.includes(r.changeType) || !productLevelFields.includes(r.changeType));
 
-        if (variants.length > 0) {
+        // Revert product-level changes (title, vendor, tags, etc.)
+        if (productLevelRecs.length > 0) {
+          const productInput = {};
+          for (const rec of productLevelRecs) {
+            if (rec.changeType === "title") productInput.title = rec.oldPrice;
+            else if (rec.changeType === "vendor") productInput.vendor = rec.oldPrice;
+            else if (rec.changeType === "productType") productInput.productType = rec.oldPrice;
+            else if (rec.changeType === "status") productInput.status = rec.oldPrice;
+            else if (rec.changeType === "tags") productInput.tags = (rec.oldPrice || "").split(",").map(t => t.trim()).filter(Boolean);
+            else if (rec.changeType === "templateSuffix") productInput.templateSuffix = rec.oldPrice;
+          }
+
+          const productMutation = `#graphql
+            mutation productUpdate($input: ProductInput!) {
+              productUpdate(input: $input) {
+                product { id }
+                userErrors { field message }
+              }
+            }`;
+
+          const result = await admin.graphql(productMutation, {
+            variables: { input: { id: productId, ...productInput } },
+          });
+          const resultData = await result.json();
+          const userErrors = resultData.data?.productUpdate?.userErrors || [];
+
+          if (userErrors.length > 0) {
+            errorCount += productLevelRecs.length;
+            console.error(`[History] Revert product-level error for ${productId}:`, userErrors);
+          } else {
+            successCount += productLevelRecs.length;
+            for (const rec of productLevelRecs) {
+              await prisma.priceHistory.create({
+                data: {
+                  shop,
+                  productId: rec.productId,
+                  variantId: rec.variantId || productId,
+                  productTitle: rec.productTitle,
+                  variantTitle: rec.variantTitle,
+                  oldPrice: rec.newPrice,
+                  newPrice: rec.oldPrice,
+                  changeType: "revert",
+                  changeSource: "manual_revert",
+                  bulkEditName: `Undo: ${rec.bulkEditName || "Bulk Edit"}`,
+                },
+              });
+            }
+          }
+        }
+
+        // Revert variant-level changes (price, compareAtPrice, sku, etc.)
+        const variantRevertRecs = variantLevelRecs.filter(r => r.variantId && r.variantId !== productId);
+        if (variantRevertRecs.length > 0) {
+          // Group by variant to build the mutation input
+          const variantMap = {};
+          for (const rec of variantRevertRecs) {
+            if (!variantMap[rec.variantId]) variantMap[rec.variantId] = { id: rec.variantId };
+            const field = rec.changeType;
+            if (field === "price" || field === "automation" || field === "automation_compare") {
+              variantMap[rec.variantId].price = rec.oldPrice;
+            } else if (field === "compareAtPrice") {
+              variantMap[rec.variantId].compareAtPrice = rec.oldPrice;
+            } else if (field === "sku") {
+              variantMap[rec.variantId].sku = rec.oldPrice;
+            } else if (field === "barcode") {
+              variantMap[rec.variantId].barcode = rec.oldPrice;
+            } else if (field === "weight") {
+              variantMap[rec.variantId].weight = parseFloat(rec.oldPrice) || 0;
+            } else if (field === "taxable") {
+              variantMap[rec.variantId].taxable = rec.oldPrice === "true";
+            } else if (field === "cost") {
+              variantMap[rec.variantId].inventoryItem = { cost: parseFloat(rec.oldPrice) || 0 };
+            }
+          }
+
+          const variants = Object.values(variantMap);
           const mutation = `#graphql
             mutation productVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
               productVariantsBulkUpdate(productId: $productId, variants: $variants) {
@@ -138,11 +215,11 @@ export const action = async ({ request }) => {
           const userErrors = resultData.data?.productVariantsBulkUpdate?.userErrors || [];
 
           if (userErrors.length > 0) {
-            errorCount += variants.length;
+            errorCount += variantRevertRecs.length;
+            console.error(`[History] Revert variant-level error for ${productId}:`, userErrors);
           } else {
-            successCount += variants.length;
-            // Record reverts in history
-            for (const rec of recs.filter(r => r.variantId && r.variantId !== productId)) {
+            successCount += variantRevertRecs.length;
+            for (const rec of variantRevertRecs) {
               await prisma.priceHistory.create({
                 data: {
                   shop,
@@ -413,8 +490,13 @@ export default function History() {
               const changeCount = run.entries.length;
               const isRevert = run.source === "manual_revert";
               const uniqueProducts = [...new Set(run.entries.map(e => e.productTitle))];
+              const priceFields = ["price", "compareAtPrice", "cost", "automation", "automation_compare"];
               const netChange = run.entries.reduce((sum, e) => {
-                return sum + (parseFloat(e.newPrice) - parseFloat(e.oldPrice));
+                if (!priceFields.includes(e.changeType)) return sum;
+                const oldVal = parseFloat(e.oldPrice);
+                const newVal = parseFloat(e.newPrice);
+                if (isNaN(oldVal) || isNaN(newVal)) return sum;
+                return sum + (newVal - oldVal);
               }, 0);
 
               return (

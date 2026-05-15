@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { useLoaderData, useFetcher, useNavigate, useRouteError, isRouteErrorResponse, useRevalidator } from "react-router";
+import { useLoaderData, useFetcher, useNavigate, useRouteError, isRouteErrorResponse, useRevalidator, useLocation } from "react-router";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
@@ -766,6 +766,7 @@ export default function BulkEdit() {
   const loadMoreFetcher = useFetcher();
   const navigate = useNavigate();
   const shopify = useAppBridge();
+  const location = useLocation();
 
   const { vendors, productTypes, allTags, collections, shop, recentEdits, currentPlan, monthlyEdits, productsPerEdit, totalProductCount } = loaderData;
 
@@ -777,6 +778,11 @@ export default function BulkEdit() {
   const products = allProducts;
 
   const [step, setStep] = useState(1);
+
+  // Reset to step 1 when navigating to this route from sidebar (location key changes)
+  useEffect(() => {
+    setStep(1);
+  }, [location.key]);
 
   // Step 1 state
   const [filterRules, setFilterRules] = useState([]);
@@ -1769,6 +1775,16 @@ export default function BulkEdit() {
                             min={isNumeric ? "0" : undefined}
                             step={isNumeric ? (mod.type.includes("percent") ? "1" : "0.01") : undefined}
                           />
+                        )}
+                        {isNumeric && mod.type === "exact" && parseFloat(mod.value) < 0 && ["price", "compareAtPrice", "cost"].includes(mod.field) && (
+                          <div style={{ fontSize: "12px", color: "#d72c0d", marginTop: "4px" }}>
+                            Price cannot be negative. Value will be set to $0.00.
+                          </div>
+                        )}
+                        {isNumeric && mod.type === "decrease_percent" && parseFloat(mod.value) > 100 && ["price", "compareAtPrice", "cost"].includes(mod.field) && (
+                          <div style={{ fontSize: "12px", color: "#b98900", marginTop: "4px" }}>
+                            Decrease exceeds 100%. Prices will be set to $0.00.
+                          </div>
                         )}
                       </div>
                       {isFindReplace && (
