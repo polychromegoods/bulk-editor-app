@@ -1658,8 +1658,8 @@ export default function BulkEdit() {
                       {product.vendor && <span>· {product.vendor}</span>}
                     </div>
                   </div>
-                  <div style={{ textAlign: "right", flexShrink: 0 }}>
-                    <div style={{ fontWeight: 600, fontSize: "12px", color: "#202223", whiteSpace: "nowrap" }}>{priceDisplay}</div>
+                  <div style={{ textAlign: "right", flexShrink: 0, minWidth: "80px" }}>
+                    <div style={{ fontWeight: 600, fontSize: "12px", color: "#202223", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "120px", marginLeft: "auto" }}>{priceDisplay}</div>
                     <span style={styles.badge(product.status === "ACTIVE" ? "success" : product.status === "DRAFT" ? "warning" : "default")}>
                       {product.status.charAt(0) + product.status.slice(1).toLowerCase()}
                     </span>
@@ -1678,7 +1678,7 @@ export default function BulkEdit() {
           <s-box padding="base">
             {productsPerEdit !== Infinity && selectedIds.size > productsPerEdit && (
               <div style={{ padding: "10px 14px", backgroundColor: "#fff4e5", border: "1px solid #f5d680", borderRadius: "8px", marginBottom: "10px", fontSize: "13px", color: "#916a00" }}>
-                ⚠️ Free plan allows up to <strong>{productsPerEdit}</strong> products per edit. You have <strong>{selectedIds.size}</strong> selected. Please deselect some products or <a href="/app/billing" style={{ color: "#2c6ecb", fontWeight: 600 }}>upgrade your plan</a> for unlimited edits.
+                ⚠️ Free plan allows up to <strong>{productsPerEdit}</strong> products per edit. You have <strong>{selectedIds.size}</strong> selected. Please deselect some products or <span onClick={() => navigate("/app/billing")} style={{ color: "#2c6ecb", fontWeight: 600, cursor: "pointer", textDecoration: "underline" }}>upgrade your plan</span> for unlimited edits.
               </div>
             )}
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" }}>
@@ -1938,6 +1938,20 @@ export default function BulkEdit() {
             </s-box>
           )}
 
+          {/* Notice when some selected products have no changes (BUG-029) */}
+          {changes.length > 0 && new Set(changes.map(c => c.productId)).size < selected.length && (
+            <s-box padding="base">
+              <div style={{ padding: "12px 16px", backgroundColor: "#f0f5ff", border: "1px solid #c4d7f2", borderRadius: "10px" }}>
+                <div style={{ fontWeight: 700, color: "#1a3a6b", marginBottom: "4px", fontSize: "13px" }}>
+                  ℹ️ {selected.length - new Set(changes.map(c => c.productId)).size} product{selected.length - new Set(changes.map(c => c.productId)).size !== 1 ? "s" : ""} excluded — already at target value
+                </div>
+                <div style={{ fontSize: "12px", color: "#4a5568", lineHeight: "1.5" }}>
+                  You selected {selected.length} products, but only {new Set(changes.map(c => c.productId)).size} will be updated. The excluded products already have the target value for the configured modification, so no change is needed.
+                </div>
+              </div>
+            </s-box>
+          )}
+
           {/* Diagnostic when 0 changes */}
           {changes.length === 0 && selected.length > 0 && modifications.length > 0 && (
             <s-box padding="base">
@@ -2007,20 +2021,20 @@ export default function BulkEdit() {
                 </div>
               ) : (
                 changes.map((c, i) => (
-                  <div key={i} style={{ display: "flex", alignItems: "center", padding: "8px 10px", borderBottom: "1px solid #f1f2f3", fontSize: "12px", backgroundColor: "white" }}>
+                  <div key={i} style={{ display: "flex", alignItems: "center", padding: "8px 10px", borderBottom: "1px solid #f1f2f3", fontSize: "12px", backgroundColor: "white", gap: "4px" }}>
                     <div style={{ flex: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
                       <span style={{ fontWeight: 600 }}>{c.productTitle}</span>
                       {c.variantTitle && c.variantTitle !== "Default Title" && (
                         <span style={{ color: "#637381" }}> — {c.variantTitle}</span>
                       )}
                     </div>
-                    <div style={{ flex: 0.5, textAlign: "center", minWidth: 0 }}>
+                    <div style={{ flex: "0 0 auto", textAlign: "center", minWidth: 0 }}>
                       <span style={styles.badge("default")}>{getFieldDef(c.field)?.label || c.field}</span>
                     </div>
-                    <div style={{ flex: 2, textAlign: "right", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      <span style={{ textDecoration: "line-through", color: "#8c9196" }}>{formatValue(c.field, c.oldValue)}</span>
+                    <div style={{ flex: 2, textAlign: "right", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "40%" }}>
+                      <span style={{ textDecoration: "line-through", color: "#8c9196", wordBreak: "break-all" }}>{formatValue(c.field, c.oldValue)}</span>
                       <span style={{ color: "#8c9196", margin: "0 4px" }}>→</span>
-                      <span style={{ fontWeight: 700, color: "#202223" }}>{formatValue(c.field, c.newValue)}</span>
+                      <span style={{ fontWeight: 700, color: "#202223", wordBreak: "break-all" }}>{formatValue(c.field, c.newValue)}</span>
                     </div>
                   </div>
                 ))
@@ -2113,10 +2127,10 @@ export default function BulkEdit() {
       {step === 4 && executionResult && (
         <s-section>
           <s-box padding="base">
-            <div style={{ textAlign: "center", padding: "20px 0" }}>
+            <div style={{ textAlign: "center", padding: "20px 16px" }}>
               {networkError || executionResult.networkError ? (
                 <>
-                  <div style={{ fontSize: "48px", marginBottom: "8px" }}>⚠️</div>
+                  <div style={{ fontSize: "40px", marginBottom: "12px", lineHeight: 1 }}>⚠️</div>
                   <s-text variant="headingLg" fontWeight="bold">Connection Interrupted</s-text>
                   <div style={{ fontSize: "14px", color: "#637381", marginTop: "8px", maxWidth: "480px", margin: "8px auto 0" }}>
                     {networkError || "The connection was lost during execution. Some changes may have been applied."}
@@ -2124,7 +2138,7 @@ export default function BulkEdit() {
                 </>
               ) : (
                 <>
-                  <div style={{ fontSize: "48px", marginBottom: "8px" }}>{executionResult.errorCount === 0 ? "✅" : "⚠️"}</div>
+                  <div style={{ fontSize: "40px", marginBottom: "12px", lineHeight: 1 }}>{executionResult.errorCount === 0 ? "✅" : "⚠️"}</div>
                   <s-text variant="headingLg" fontWeight="bold">
                     {executionResult.errorCount === 0 ? "All Changes Applied Successfully" : "Changes Applied with Some Errors"}
                   </s-text>
@@ -2194,7 +2208,7 @@ export default function BulkEdit() {
                 </button>
               )}
               <button style={styles.primaryBtn(true)} onClick={() => {
-                window.location.href = "/app/bulk-edit";
+                navigate("/app/bulk-edit");
               }}>Start New Bulk Edit</button>
               <button style={{ ...styles.secondaryBtn, fontWeight: 700 }} onClick={() => navigate("/app/history")}>View History</button>
               <button style={styles.secondaryBtn} onClick={() => navigate("/app")}>Back to Dashboard</button>
