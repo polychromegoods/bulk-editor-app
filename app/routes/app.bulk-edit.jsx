@@ -21,6 +21,11 @@ export const loader = async ({ request }) => {
           node {
             id title handle status productType vendor tags
             featuredMedia { preview { image { url altText } } }
+            metafields(first: 30) {
+              edges {
+                node { namespace key value type }
+              }
+            }
             variants(first: 100) {
               edges {
                 node {
@@ -43,6 +48,11 @@ export const loader = async ({ request }) => {
           node {
             id title handle status productType vendor tags
             featuredMedia { preview { image { url altText } } }
+            metafields(first: 30) {
+              edges {
+                node { namespace key value type }
+              }
+            }
             variants(first: 100) {
               edges {
                 node {
@@ -130,6 +140,27 @@ export const loader = async ({ request }) => {
   const collectionData = await collectionResponse.json();
   const collections = (collectionData.data?.collections?.edges || []).map((e) => e.node);
 
+  // Fetch product metafield definitions
+  let metafieldDefinitions = [];
+  try {
+    const mfDefResp = await admin.graphql(`#graphql
+      query {
+        metafieldDefinitions(first: 100, ownerType: PRODUCT) {
+          edges {
+            node {
+              id name namespace key
+              type { name }
+              description
+            }
+          }
+        }
+      }`);
+    const mfDefData = await mfDefResp.json();
+    metafieldDefinitions = (mfDefData.data?.metafieldDefinitions?.edges || []).map(e => e.node);
+  } catch (mfErr) {
+    console.warn("[BulkEdit] Failed to fetch metafield definitions:", mfErr.message);
+  }
+
   const recentEdits = await prisma.bulkEdit.findMany({
     where: { shop: session.shop },
     orderBy: { createdAt: "desc" },
@@ -165,7 +196,7 @@ export const loader = async ({ request }) => {
 
   return {
     products, vendors, productTypes, allTags, collections,
-    shop: session.shop, recentEdits,
+    shop: session.shop, recentEdits, metafieldDefinitions,
     currentPlan: plan, monthlyEdits, productsPerEdit,
     hasNextPage, endCursor, totalProductCount,
   };
@@ -233,9 +264,72 @@ export const action = async ({ request }) => {
 
     for (const [productId, productChanges] of Object.entries(changesByProduct)) {
       try {
-        // Separate product-level and variant-level changes
+        // Separate product-level, variant-level, and metafield changes
+        const metafieldChanges = productChanges.filter(c => c.field.startsWith("metafield::"));
         const productLevelChanges = productChanges.filter(c => ["title", "vendor", "productType", "status", "tags", "templateSuffix"].includes(c.field));
         const variantLevelChanges = productChanges.filter(c => ["price", "compareAtPrice", "sku", "barcode", "weight", "taxable"].includes(c.field));
+
+        // Apply metafield changes via metafieldsSet
+        if (metafieldChanges.length > 0) {
+          const metafields = metafieldChanges.map(change => {
+            const parts = change.field.split("::"); // metafield::namespace::key
+            const namespace = parts[1];
+            const key = parts[2];
+            return {
+              ownerId: productId,
+              namespace,
+              key,
+              value: change.newValue,
+              type: "single_line_text_field",
+            };
+          });
+
+          const metafieldMutation = `#graphql
+            mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
+              metafieldsSet(metafields: $metafields) {
+                metafields { id namespace key value }
+                userErrors { field message }
+              }
+            }`;
+
+          const mfResult = await admin.graphql(metafieldMutation, {
+            variables: { metafields },
+          });
+          const mfResultData = await mfResult.json();
+          const mfUserErrors = mfResultData.data?.metafieldsSet?.userErrors || [];
+          if (mfUserErrors.length > 0) {
+            errorCount += metafieldChanges.length;
+            errors.push({ product: productChanges[0]?.productTitle, errors: mfUserErrors.map(e => e.message) });
+            for (const change of metafieldChanges) {
+              historyRecords.push({
+                shop: session.shop,
+                productId: change.productId,
+                variantId: change.variantId || productId,
+                productTitle: change.productTitle,
+                variantTitle: change.variantTitle || null,
+                oldPrice: change.oldValue,
+                newPrice: mfUserErrors.map(e => e.message).join("; "),
+                changeType: change.field,
+                changeSource: "bulk_edit_failed",
+              });
+            }
+          } else {
+            successCount += metafieldChanges.length;
+            for (const change of metafieldChanges) {
+              historyRecords.push({
+                shop: session.shop,
+                productId: change.productId,
+                variantId: change.variantId || productId,
+                productTitle: change.productTitle,
+                variantTitle: change.variantTitle || null,
+                oldPrice: change.oldValue,
+                newPrice: change.newValue,
+                changeType: change.field,
+                changeSource: "bulk_edit",
+              });
+            }
+          }
+        }
 
         // Apply product-level changes
         if (productLevelChanges.length > 0) {
@@ -434,6 +528,11 @@ export const action = async ({ request }) => {
             node {
               id title handle status productType vendor tags
               featuredMedia { preview { image { url altText } } }
+              metafields(first: 30) {
+                edges {
+                  node { namespace key value type }
+                }
+              }
               variants(first: 100) {
                 edges {
                   node {
@@ -454,6 +553,11 @@ export const action = async ({ request }) => {
             node {
               id title handle status productType vendor tags
               featuredMedia { preview { image { url altText } } }
+              metafields(first: 30) {
+                edges {
+                  node { namespace key value type }
+                }
+              }
               variants(first: 100) {
                 edges {
                   node {
@@ -513,8 +617,28 @@ export const action = async ({ request }) => {
 
     for (const [productId, productChanges] of Object.entries(changesByProduct)) {
       try {
+        const metafieldChanges = productChanges.filter(c => c.field.startsWith("metafield::"));
         const productLevelChanges = productChanges.filter(c => ["title", "vendor", "productType", "status", "tags"].includes(c.field));
-        const variantLevelChanges = productChanges.filter(c => !["title", "vendor", "productType", "status", "tags"].includes(c.field));
+        const variantLevelChanges = productChanges.filter(c => !c.field.startsWith("metafield::") && !["title", "vendor", "productType", "status", "tags"].includes(c.field));
+
+        // Revert metafield changes
+        if (metafieldChanges.length > 0) {
+          const metafields = metafieldChanges.map(change => {
+            const parts = change.field.split("::");
+            return {
+              ownerId: productId,
+              namespace: parts[1],
+              key: parts[2],
+              value: change.oldValue || "",
+              type: "single_line_text_field",
+            };
+          });
+          await admin.graphql(`#graphql
+            mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
+              metafieldsSet(metafields: $metafields) { metafields { id } userErrors { field message } }
+            }`, { variables: { metafields } });
+          successCount += metafieldChanges.length;
+        }
 
         if (productLevelChanges.length > 0) {
           const productInput = {};
@@ -562,7 +686,7 @@ export const action = async ({ request }) => {
    FIELD DEFINITIONS — determines what can be edited and how
    ═══════════════════════════════════════════════════════════════ */
 
-const EDITABLE_FIELDS = [
+const BASE_EDITABLE_FIELDS = [
   // Numeric (variant-level)
   { value: "price", label: "Price", icon: "💰", category: "numeric", level: "variant", accessor: (v) => v.price },
   { value: "compareAtPrice", label: "Compare-at Price", icon: "🏷", category: "numeric", level: "variant", accessor: (v) => v.compareAtPrice },
@@ -581,6 +705,39 @@ const EDITABLE_FIELDS = [
   { value: "status", label: "Status", icon: "🔄", category: "select", level: "product", accessor: null, options: ["ACTIVE", "DRAFT", "ARCHIVED"] },
   { value: "templateSuffix", label: "Product Template", icon: "📄", category: "text", level: "product", accessor: null },
 ];
+
+// Metafield field value format: "metafield::{namespace}::{key}"
+function buildMetafieldFields(metafieldDefinitions) {
+  if (!metafieldDefinitions || metafieldDefinitions.length === 0) return [];
+  const textTypes = ["single_line_text_field", "multi_line_text_field", "url", "color"];
+  const numericTypes = ["number_integer", "number_decimal"];
+  return metafieldDefinitions
+    .filter(d => textTypes.includes(d.type?.name) || numericTypes.includes(d.type?.name))
+    .map(d => {
+      const isNumeric = numericTypes.includes(d.type?.name);
+      const isGoogle = d.namespace === "mm-google-shopping";
+      const isFacebook = d.namespace === "facebook";
+      let group = "custom";
+      if (isGoogle) group = "google";
+      else if (isFacebook) group = "facebook";
+      return {
+        value: `metafield::${d.namespace}::${d.key}`,
+        label: d.name || `${d.namespace}.${d.key}`,
+        icon: isGoogle ? "🔍" : isFacebook ? "📘" : "🏷",
+        category: isNumeric ? "numeric" : "text",
+        level: "product",
+        accessor: null,
+        isMetafield: true,
+        namespace: d.namespace,
+        key: d.key,
+        metafieldType: d.type?.name,
+        group,
+      };
+    });
+}
+
+// Static reference for non-component code (action handler)
+const EDITABLE_FIELDS = BASE_EDITABLE_FIELDS;
 
 const NUMERIC_CHANGE_TYPES = [
   { value: "exact", label: "Set to exact value" },
@@ -607,18 +764,20 @@ const SELECT_CHANGE_TYPES = [
   { value: "set", label: "Set to" },
 ];
 
-function getChangeTypes(fieldValue) {
-  const field = EDITABLE_FIELDS.find(f => f.value === fieldValue);
-  if (!field) return NUMERIC_CHANGE_TYPES;
+function getChangeTypes(fieldValue, allFields) {
+  const fields = allFields || EDITABLE_FIELDS;
+  const field = fields.find(f => f.value === fieldValue);
+  if (!field) return TEXT_CHANGE_TYPES; // metafields default to text
   if (field.category === "numeric") return NUMERIC_CHANGE_TYPES;
   if (field.category === "text") return TEXT_CHANGE_TYPES;
   if (field.category === "tags") return TAG_CHANGE_TYPES;
   if (field.category === "select") return SELECT_CHANGE_TYPES;
-  return NUMERIC_CHANGE_TYPES;
+  return TEXT_CHANGE_TYPES;
 }
 
-function getFieldDef(fieldValue) {
-  return EDITABLE_FIELDS.find(f => f.value === fieldValue);
+function getFieldDef(fieldValue, allFields) {
+  const fields = allFields || EDITABLE_FIELDS;
+  return fields.find(f => f.value === fieldValue);
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -810,7 +969,23 @@ export default function BulkEdit() {
   const shopify = useAppBridge();
   const location = useLocation();
 
-  const { vendors, productTypes, allTags, collections, shop, recentEdits, currentPlan, monthlyEdits, productsPerEdit, totalProductCount } = loaderData;
+  const { vendors, productTypes, allTags, collections, shop, recentEdits, currentPlan, monthlyEdits, productsPerEdit, totalProductCount, metafieldDefinitions } = loaderData;
+
+  // Build complete field list including metafields
+  const allFields = useMemo(() => {
+    const metafieldFields = buildMetafieldFields(metafieldDefinitions || []);
+    return [...BASE_EDITABLE_FIELDS, ...metafieldFields];
+  }, [metafieldDefinitions]);
+
+  // Group metafield fields by category for the dropdown
+  const metafieldGroups = useMemo(() => {
+    const mfFields = allFields.filter(f => f.isMetafield);
+    return {
+      google: mfFields.filter(f => f.group === "google"),
+      facebook: mfFields.filter(f => f.group === "facebook"),
+      custom: mfFields.filter(f => f.group === "custom"),
+    };
+  }, [allFields]);
 
   // Paginated product state
   const [allProducts, setAllProducts] = useState(loaderData.products);
@@ -1095,7 +1270,7 @@ export default function BulkEdit() {
         const updated = { ...m, [key]: val };
         // When field changes, reset type to first available for that category
         if (key === "field") {
-          const types = getChangeTypes(val);
+          const types = getChangeTypes(val, allFields);
           updated.type = types[0]?.value || "exact";
           updated.value = "";
           updated.value2 = "";
@@ -1114,7 +1289,7 @@ export default function BulkEdit() {
 
   // ── Value calculation ──
   const calcValue = (current, mod) => {
-    const fieldDef = getFieldDef(mod.field);
+    const fieldDef = getFieldDef(mod.field, allFields);
     if (!fieldDef) return null;
 
     if (fieldDef.category === "numeric") {
@@ -1184,20 +1359,32 @@ export default function BulkEdit() {
     return null;
   };
 
+  // Helper to get current metafield value from product
+  const getMetafieldValue = (product, namespace, key) => {
+    const mfEdges = product.metafields?.edges || [];
+    const mf = mfEdges.find(e => e.node.namespace === namespace && e.node.key === key);
+    return mf?.node?.value || "";
+  };
+
   // ── Build changes ──
   const changes = useMemo(() => {
     if (step !== 3) return [];
     const result = [];
     for (const product of selected) {
       for (const mod of modifications) {
-        const fieldDef = getFieldDef(mod.field);
+        const fieldDef = getFieldDef(mod.field, allFields);
         if (!fieldDef) continue;
 
         if (fieldDef.level === "product") {
           // Product-level field — one change per product
           let cur;
-          if (mod.field === "tags") cur = (product.tags || []).join(", ");
-          else cur = product[mod.field] || "";
+          if (fieldDef.isMetafield) {
+            cur = getMetafieldValue(product, fieldDef.namespace, fieldDef.key);
+          } else if (mod.field === "tags") {
+            cur = (product.tags || []).join(", ");
+          } else {
+            cur = product[mod.field] || "";
+          }
 
           const nv = calcValue(cur, mod);
           if (nv === null) continue;
@@ -1245,7 +1432,7 @@ export default function BulkEdit() {
       }
     }
     return result;
-  }, [step, selected, modifications]);
+  }, [step, selected, modifications, allFields]);
 
   const canConfigure = selectedIds.size > 0;
   const canPreview = canConfigure && modifications.length > 0 && modifications.every((m) => m.value);
@@ -1256,16 +1443,21 @@ export default function BulkEdit() {
     const examples = [];
     for (const product of selected.slice(0, 8)) {
       for (const mod of modifications) {
-        const fieldDef = getFieldDef(mod.field);
+        const fieldDef = getFieldDef(mod.field, allFields);
         if (!fieldDef) continue;
 
         if (fieldDef.level === "product") {
           let cur;
-          if (mod.field === "tags") cur = (product.tags || []).join(", ");
-          else cur = product[mod.field] || "";
+          if (fieldDef.isMetafield) {
+            cur = getMetafieldValue(product, fieldDef.namespace, fieldDef.key);
+          } else if (mod.field === "tags") {
+            cur = (product.tags || []).join(", ");
+          } else {
+            cur = product[mod.field] || "";
+          }
           const nv = calcValue(cur, mod);
           if (nv === null || nv === cur) continue;
-          examples.push({ title: product.title, variant: null, field: mod.field, oldValue: cur, newValue: nv });
+          examples.push({ title: product.title, variant: null, field: mod.field, oldValue: cur || "(empty)", newValue: nv });
         } else {
           for (const edge of product.variants?.edges || []) {
             const variant = edge.node;
@@ -1288,7 +1480,7 @@ export default function BulkEdit() {
       if (examples.length >= 10) break;
     }
     return examples;
-  }, [selected, modifications]);
+  }, [selected, modifications, allFields]);
 
   // ── Execution ──
   const handleExecute = () => setShowConfirmDialog(true);
@@ -1299,12 +1491,17 @@ export default function BulkEdit() {
     const changesToSubmit = [];
     for (const product of selected) {
       for (const mod of modifications) {
-        const fieldDef = getFieldDef(mod.field);
+        const fieldDef = getFieldDef(mod.field, allFields);
         if (!fieldDef) continue;
         if (fieldDef.level === "product") {
           let cur;
-          if (mod.field === "tags") cur = (product.tags || []).join(", ");
-          else cur = product[mod.field] || "";
+          if (fieldDef.isMetafield) {
+            cur = getMetafieldValue(product, fieldDef.namespace, fieldDef.key);
+          } else if (mod.field === "tags") {
+            cur = (product.tags || []).join(", ");
+          } else {
+            cur = product[mod.field] || "";
+          }
           const nv = calcValue(cur, mod);
           if (nv === null || nv === cur) continue;
           changesToSubmit.push({ productId: product.id, productTitle: product.title, variantId: null, variantTitle: null, field: mod.field, oldValue: cur, newValue: nv, modificationType: mod.type });
@@ -1390,14 +1587,14 @@ export default function BulkEdit() {
 
   // ── Field label helper ──
   const fieldLabel = (fieldValue) => {
-    const f = EDITABLE_FIELDS.find(fd => fd.value === fieldValue);
+    const f = allFields.find(fd => fd.value === fieldValue);
     return f ? `${f.icon} ${f.label}` : fieldValue;
   };
 
   // ── Format display value ──
   const formatValue = (fieldValue, val) => {
-    const f = getFieldDef(fieldValue);
-    if (!f) return val;
+    const f = getFieldDef(fieldValue, allFields);
+    if (!f) return val || "(empty)";
     if (f.category === "numeric") {
       const priceFields = ["price", "compareAtPrice", "cost"];
       if (priceFields.includes(fieldValue)) return `$${val}`;
@@ -1748,8 +1945,8 @@ export default function BulkEdit() {
               </div>
             ) : (
               modifications.map((mod, idx) => {
-                const fieldDef = getFieldDef(mod.field);
-                const changeTypes = getChangeTypes(mod.field);
+                const fieldDef = getFieldDef(mod.field, allFields);
+                const changeTypes = getChangeTypes(mod.field, allFields);
                 const isNumeric = fieldDef?.category === "numeric";
                 const isSelect = fieldDef?.category === "select";
                 const isFindReplace = mod.type === "find_replace";
@@ -1787,6 +1984,21 @@ export default function BulkEdit() {
                             <option value="status">Status</option>
                             <option value="templateSuffix">Product Template</option>
                           </optgroup>
+                          {metafieldGroups.google.length > 0 && (
+                            <optgroup label="🔍 Google Shopping">
+                              {metafieldGroups.google.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
+                            </optgroup>
+                          )}
+                          {metafieldGroups.facebook.length > 0 && (
+                            <optgroup label="📘 Meta / Facebook">
+                              {metafieldGroups.facebook.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
+                            </optgroup>
+                          )}
+                          {metafieldGroups.custom.length > 0 && (
+                            <optgroup label="🏷 Custom Metafields">
+                              {metafieldGroups.custom.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
+                            </optgroup>
+                          )}
                         </select>
                       </div>
                       <div>
@@ -1993,10 +2205,10 @@ export default function BulkEdit() {
           <s-box padding="base">
             <div style={{ fontWeight: 600, fontSize: "14px", marginBottom: "8px" }}>Modifications Applied</div>
             {modifications.map((mod, idx) => {
-              const fd = getFieldDef(mod.field);
+              const fd = getFieldDef(mod.field, allFields);
               return (
                 <div key={mod.id} style={{ padding: "10px 14px", marginBottom: "6px", borderRadius: "8px", backgroundColor: "#f6f6f7", fontSize: "14px" }}>
-                  <strong>{idx + 1}.</strong> {fd?.icon} {fd?.label} → {getChangeTypes(mod.field).find(ct => ct.value === mod.type)?.label}: <strong>{mod.value}</strong>
+                  <strong>{idx + 1}.</strong> {fd?.icon} {fd?.label} → {getChangeTypes(mod.field, allFields).find(ct => ct.value === mod.type)?.label}: <strong>{mod.value}</strong>
                   {mod.type === "find_replace" && <> → <strong>{mod.value2 || "(empty)"}</strong></>}
                   {mod.rounding && mod.rounding !== "none" && <span style={{ color: "#637381" }}> (round to .{mod.rounding === "whole" ? "00" : mod.rounding})</span>}
                 </div>
