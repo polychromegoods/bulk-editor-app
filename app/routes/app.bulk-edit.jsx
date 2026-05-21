@@ -1965,14 +1965,6 @@ export default function BulkEdit() {
 
 
 
-          {/* Edit name */}
-          <s-box padding="base">
-            <div style={styles.card}>
-              <div style={{ marginBottom: "4px", fontWeight: 600, fontSize: "13px" }}>Edit Name (optional)</div>
-              <input type="text" placeholder="e.g., Summer Sale, Vendor Update, Tag Cleanup" value={editName} onChange={(e) => setEditName(e.target.value)} style={styles.input} />
-            </div>
-          </s-box>
-
           {/* Modifications */}
           <s-box padding="base">
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "12px", flexWrap: "wrap", gap: "8px" }}>
@@ -1980,7 +1972,7 @@ export default function BulkEdit() {
                 <div style={{ fontWeight: 600, fontSize: "15px", color: "#202223" }}>Modifications</div>
                 <div style={{ fontSize: "12px", color: "#637381" }}>Add one or more field changes to apply to selected products</div>
               </div>
-              <button onClick={() => { addMod(); setActivePreset(null); }} style={{ ...styles.secondaryBtn, whiteSpace: "nowrap", flexShrink: 0 }}>+ Add Modification</button>
+              <button onClick={() => { addMod(); setActivePreset(null); }} style={{ ...styles.primaryBtn(true), whiteSpace: "nowrap", flexShrink: 0 }}>+ Add Modification</button>
             </div>
 
             {modifications.length === 0 ? (
@@ -2174,6 +2166,14 @@ export default function BulkEdit() {
           )}
 
           {/* Navigation */}
+          {/* Name Bulk Edit */}
+          <s-box padding="base">
+            <div style={styles.card}>
+              <div style={{ marginBottom: "4px", fontWeight: 600, fontSize: "13px" }}>Name Bulk Edit (optional)</div>
+              <input type="text" placeholder="e.g., Summer Sale, Vendor Update, Tag Cleanup" value={editName} onChange={(e) => setEditName(e.target.value)} style={styles.input} />
+            </div>
+          </s-box>
+
           <s-box padding="base">
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" }}>
               <button style={styles.secondaryBtn} onClick={() => setStep(1)}>← Back</button>
@@ -2194,15 +2194,15 @@ export default function BulkEdit() {
       {step === 3 && (
         <s-section>
           <s-box padding="base">
-            <s-text variant="headingMd" fontWeight="bold">Review & Execute</s-text>
-            <s-text tone="subdued" variant="bodySm">Double-check everything before applying changes. You can undo after execution.</s-text>
+            <div style={{ fontWeight: 700, fontSize: "16px", color: "#202223" }}>Review & Execute</div>
+            <div style={{ fontSize: "13px", color: "#637381", marginTop: "4px" }}>Double-check everything before applying changes. You can undo after execution.</div>
             <div style={{ marginTop: "8px", fontSize: "13px", color: "#637381" }}>
               {selected.length} product{selected.length !== 1 ? "s" : ""} selected • {totalVariants} variant{totalVariants !== 1 ? "s" : ""} total • {modifications.length} modification{modifications.length !== 1 ? "s" : ""} configured
             </div>
           </s-box>
 
-          {/* Active Filters */}
-          {filterRules.length > 0 && (
+          {/* Active Filters - only show when filters have actual values */}
+          {filterRules.filter(r => r.value && r.value.trim() !== "").length > 0 && (
             <s-box padding="base">
               <div style={{ fontWeight: 600, fontSize: "14px", marginBottom: "8px" }}>🔍 Active Filters</div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
