@@ -21,7 +21,7 @@ export const loader = async ({ request }) => {
           node {
             id title handle status productType vendor tags
             featuredMedia { preview { image { url altText } } }
-            metafields(first: 30) {
+            metafields(first: 50) {
               edges {
                 node { namespace key value type }
               }
@@ -48,7 +48,7 @@ export const loader = async ({ request }) => {
           node {
             id title handle status productType vendor tags
             featuredMedia { preview { image { url altText } } }
-            metafields(first: 30) {
+            metafields(first: 50) {
               edges {
                 node { namespace key value type }
               }
@@ -528,7 +528,7 @@ export const action = async ({ request }) => {
             node {
               id title handle status productType vendor tags
               featuredMedia { preview { image { url altText } } }
-              metafields(first: 30) {
+              metafields(first: 50) {
                 edges {
                   node { namespace key value type }
                 }
@@ -553,7 +553,7 @@ export const action = async ({ request }) => {
             node {
               id title handle status productType vendor tags
               featuredMedia { preview { image { url altText } } }
-              metafields(first: 30) {
+              metafields(first: 50) {
                 edges {
                   node { namespace key value type }
                 }
@@ -707,15 +707,43 @@ const BASE_EDITABLE_FIELDS = [
 ];
 
 // Metafield field value format: "metafield::{namespace}::{key}"
+// Known Google Shopping & Facebook/Meta custom label fields (always available)
+const KNOWN_GOOGLE_SHOPPING_FIELDS = [
+  { namespace: "mm-google-shopping", key: "custom_label_0", name: "Google Custom Label 0" },
+  { namespace: "mm-google-shopping", key: "custom_label_1", name: "Google Custom Label 1" },
+  { namespace: "mm-google-shopping", key: "custom_label_2", name: "Google Custom Label 2" },
+  { namespace: "mm-google-shopping", key: "custom_label_3", name: "Google Custom Label 3" },
+  { namespace: "mm-google-shopping", key: "custom_label_4", name: "Google Custom Label 4" },
+  { namespace: "mm-google-shopping", key: "custom_product_type", name: "Google Custom Product Type" },
+  { namespace: "mm-google-shopping", key: "ads_label", name: "Google Ads Label" },
+];
+
+const KNOWN_FACEBOOK_FIELDS = [
+  { namespace: "facebook", key: "custom_label_0", name: "Meta Custom Label 0" },
+  { namespace: "facebook", key: "custom_label_1", name: "Meta Custom Label 1" },
+  { namespace: "facebook", key: "custom_label_2", name: "Meta Custom Label 2" },
+  { namespace: "facebook", key: "custom_label_3", name: "Meta Custom Label 3" },
+  { namespace: "facebook", key: "custom_label_4", name: "Meta Custom Label 4" },
+];
+
+const KNOWN_GOOGLE_NAMESPACE = [
+  { namespace: "google", key: "custom_label_0", name: "Google Label 0 (alt)" },
+  { namespace: "google", key: "custom_label_1", name: "Google Label 1 (alt)" },
+  { namespace: "google", key: "custom_label_2", name: "Google Label 2 (alt)" },
+  { namespace: "google", key: "custom_label_3", name: "Google Label 3 (alt)" },
+  { namespace: "google", key: "custom_label_4", name: "Google Label 4 (alt)" },
+];
+
 function buildMetafieldFields(metafieldDefinitions) {
-  if (!metafieldDefinitions || metafieldDefinitions.length === 0) return [];
   const textTypes = ["single_line_text_field", "multi_line_text_field", "url", "color"];
   const numericTypes = ["number_integer", "number_decimal"];
-  return metafieldDefinitions
+
+  // Build fields from store definitions
+  const definedFields = (metafieldDefinitions || [])
     .filter(d => textTypes.includes(d.type?.name) || numericTypes.includes(d.type?.name))
     .map(d => {
       const isNumeric = numericTypes.includes(d.type?.name);
-      const isGoogle = d.namespace === "mm-google-shopping";
+      const isGoogle = d.namespace === "mm-google-shopping" || d.namespace === "google";
       const isFacebook = d.namespace === "facebook";
       let group = "custom";
       if (isGoogle) group = "google";
@@ -734,6 +762,31 @@ function buildMetafieldFields(metafieldDefinitions) {
         group,
       };
     });
+
+  // Track which namespace::key combos already exist from definitions
+  const existingKeys = new Set(definedFields.map(f => `${f.namespace}::${f.key}`));
+
+  // Add known Google Shopping fields that don't already have definitions
+  const knownFields = [...KNOWN_GOOGLE_SHOPPING_FIELDS, ...KNOWN_FACEBOOK_FIELDS, ...KNOWN_GOOGLE_NAMESPACE]
+    .filter(kf => !existingKeys.has(`${kf.namespace}::${kf.key}`))
+    .map(kf => {
+      const isGoogle = kf.namespace === "mm-google-shopping" || kf.namespace === "google";
+      return {
+        value: `metafield::${kf.namespace}::${kf.key}`,
+        label: kf.name,
+        icon: isGoogle ? "🔍" : "📘",
+        category: "text",
+        level: "product",
+        accessor: null,
+        isMetafield: true,
+        namespace: kf.namespace,
+        key: kf.key,
+        metafieldType: "single_line_text_field",
+        group: isGoogle ? "google" : "facebook",
+      };
+    });
+
+  return [...definedFields, ...knownFields];
 }
 
 // Static reference for non-component code (action handler)
