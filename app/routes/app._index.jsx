@@ -254,160 +254,130 @@ export default function Dashboard() {
         Bulk Edit
       </s-button>
 
-      {/* Plan Status Banner */}
+      {/* ─── HERO: Primary CTA ─── */}
       <s-section>
-        <div style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          padding: "16px 20px",
-          borderRadius: "12px",
-          backgroundColor: currentPlan === "free" ? "#f6f6f7" : currentPlan === "unlimited" ? "#f0f5ff" : currentPlan === "pro" ? "#f0f5ff" : "#faf5ff",
-          border: `1px solid ${currentPlan === "free" ? "#e1e3e5" : currentPlan === "premium" ? "#d8c4f0" : "#c4d6f0"}`,
-          flexWrap: "wrap",
-          gap: "16px",
-        }}>
+        <div
+          onClick={() => navigate("/app/bulk-edit")}
+          style={{
+            padding: "28px 32px",
+            borderRadius: "14px",
+            background: "linear-gradient(135deg, #1a56db 0%, #2c6ecb 50%, #3b82f6 100%)",
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: "20px",
+            boxShadow: "0 4px 14px rgba(44, 110, 203, 0.3)",
+            transition: "transform 0.15s, box-shadow 0.15s",
+          }}
+        >
           <div>
-            <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
-              <span style={{
-                display: "inline-block",
-                padding: "2px 10px",
-                borderRadius: "10px",
-                fontSize: "12px",
-                fontWeight: 700,
-                backgroundColor: currentPlan === "free" ? "#e4e5e7" : currentPlan === "premium" ? "#7c3aed" : "#2c6ecb",
-                color: currentPlan === "free" ? "#637381" : "white",
-              }}>
-                {planName} Plan
-              </span>
-              {currentPlan === "free" && (
-                <span style={{ fontSize: "13px", color: "#637381" }}>
-                  — <a href="/app/billing" style={{ color: "#2c6ecb", textDecoration: "none", fontWeight: 600 }}>Upgrade for unlimited products</a>
-                </span>
-              )}
+            <div style={{ fontSize: "22px", fontWeight: 800, color: "white", marginBottom: "6px" }}>
+              Start Bulk Edit
             </div>
-            <div style={{ fontSize: "14px", color: "#202223" }}>
-              Products per edit: <strong>{productsPerEdit === Infinity ? "Unlimited" : productsPerEdit}</strong>
-              {" "}· Automations: <strong>{automationLimit === Infinity ? "Unlimited" : automationLimit === 0 ? "None" : `Up to ${automationLimit}`}</strong>
-              {" "}· <strong>{monthlyEdits}</strong> edits this month
+            <div style={{ fontSize: "14px", color: "rgba(255,255,255,0.85)", maxWidth: "420px" }}>
+              Select products, choose fields to change, preview results, and apply — all in one flow.
             </div>
           </div>
-          <button
-            onClick={() => navigate("/app/billing")}
-            style={{
-              padding: "8px 20px",
-              borderRadius: "8px",
-              border: currentPlan === "free" ? "none" : "1px solid #c4cdd5",
-              backgroundColor: currentPlan === "free" ? "#2c6ecb" : "white",
-              color: currentPlan === "free" ? "white" : "#637381",
-              fontSize: "13px",
-              fontWeight: 600,
-              cursor: "pointer",
-            }}
-          >
-            {currentPlan === "free" ? "Upgrade" : "Manage Plan"}
-          </button>
+          <div style={{
+            padding: "14px 28px",
+            borderRadius: "10px",
+            backgroundColor: "white",
+            color: "#1a56db",
+            fontWeight: 700,
+            fontSize: "15px",
+            whiteSpace: "nowrap",
+            boxShadow: "0 2px 8px rgba(0,0,0,0.1)",
+          }}>
+            Open Editor →
+          </div>
         </div>
       </s-section>
 
-      {/* Welcome banner for new users */}
-      {historyCount === 0 && (
-        <s-section>
-          <div style={{ padding: "24px", background: "linear-gradient(135deg, #f0f5ff 0%, #e3f1df 100%)", borderRadius: "12px", border: "1px solid #c4cdd5" }}>
-            <div style={{ fontSize: "20px", fontWeight: 700, color: "#202223", marginBottom: "8px" }}>
-              Welcome to Bulk Editor
-            </div>
-            <div style={{ fontSize: "14px", color: "#637381", marginBottom: "16px", maxWidth: "600px" }}>
-              Update any product field across your entire catalog in seconds. Select products, choose what to change (prices, titles, tags, vendor, status, and more), preview the results, and apply with one click.
-            </div>
-            <div style={{ display: "flex", gap: "8px" }}>
-              <button
-                onClick={() => navigate("/app/bulk-edit")}
-                style={{ padding: "10px 24px", borderRadius: "8px", border: "none", backgroundColor: "#2c6ecb", color: "white", fontSize: "14px", fontWeight: 600, cursor: "pointer" }}
-              >
-                Start Your First Bulk Edit →
-              </button>
-              <button
-                onClick={() => navigate("/app/products")}
-                style={{ padding: "10px 24px", borderRadius: "8px", border: "1px solid #c4cdd5", backgroundColor: "white", fontSize: "14px", cursor: "pointer" }}
-              >
-                Browse Products
-              </button>
-            </div>
-          </div>
-        </s-section>
-      )}
-
-      {/* Stats Grid */}
-      <s-section heading="Store Overview">
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "12px" }}>
-          {statCards.map((stat, i) => (
+      {/* ─── HOW IT WORKS: 3-step guide ─── */}
+      <s-section heading="How It Works">
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "16px" }}>
+          {[
+            { step: "1", title: "Select Products", desc: "Pick individual products or load your entire catalog. Filter by vendor, type, tags, or price range.", icon: "☑️" },
+            { step: "2", title: "Configure Changes", desc: "Choose a field (price, title, tags, metafields, etc.) and set the modification — percentage, fixed amount, find & replace, and more.", icon: "⚙️" },
+            { step: "3", title: "Review & Apply", desc: "Preview every change before applying. See old vs. new values, then execute with one click. Undo anytime from History.", icon: "✅" },
+          ].map((s, i) => (
             <div key={i} style={{
               padding: "20px",
               borderRadius: "12px",
-              border: "1px solid #e1e3e5",
-              backgroundColor: "white",
-              borderTop: `3px solid ${stat.color}`,
+              backgroundColor: "#f8fafb",
+              border: "1px solid #e8ecf0",
+              position: "relative",
             }}>
-              <div style={{ fontSize: "24px", marginBottom: "4px" }}>{stat.icon}</div>
-              <div style={{ fontSize: "28px", fontWeight: 800, color: "#202223" }}>{stat.value}</div>
-              <div style={{ fontSize: "13px", color: "#637381" }}>{stat.label}</div>
+              <div style={{
+                display: "flex", alignItems: "center", gap: "10px", marginBottom: "10px",
+              }}>
+                <span style={{
+                  display: "inline-flex", alignItems: "center", justifyContent: "center",
+                  width: "28px", height: "28px", borderRadius: "50%",
+                  backgroundColor: "#2c6ecb", color: "white", fontSize: "13px", fontWeight: 700,
+                }}>{s.step}</span>
+                <span style={{ fontWeight: 700, fontSize: "14px", color: "#202223" }}>{s.title}</span>
+              </div>
+              <div style={{ fontSize: "13px", color: "#637381", lineHeight: "1.5" }}>{s.desc}</div>
             </div>
           ))}
         </div>
       </s-section>
 
-      {/* Quick Actions */}
+      {/* ─── QUICK ACTIONS: Button-like cards ─── */}
       <s-section heading="Quick Actions">
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "12px" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "12px" }}>
           {quickActions.map((action, i) => (
-            <div
+            <button
               key={i}
               onClick={() => !action.locked && navigate(action.path)}
+              disabled={action.locked}
               style={{
-                padding: "16px",
+                padding: "18px 16px",
                 borderRadius: "12px",
-                border: "1px solid #e1e3e5",
-                borderTop: `3px solid ${action.color}`,
-                cursor: action.locked ? "default" : "pointer",
-                backgroundColor: action.locked ? "#fafbfb" : "white",
-                opacity: action.locked ? 0.6 : 1,
+                border: i === 0 ? "2px solid #2c6ecb" : "1.5px solid #d1d5db",
+                cursor: action.locked ? "not-allowed" : "pointer",
+                backgroundColor: i === 0 ? "#f0f5ff" : "white",
+                opacity: action.locked ? 0.5 : 1,
                 transition: "all 0.15s",
+                textAlign: "left",
+                display: "flex",
+                alignItems: "center",
+                gap: "14px",
+                boxShadow: i === 0 ? "0 2px 8px rgba(44,110,203,0.12)" : "0 1px 3px rgba(0,0,0,0.04)",
               }}
             >
-              <div style={{ fontSize: "28px", marginBottom: "8px" }}>{action.icon}</div>
-              <div style={{ fontWeight: 700, fontSize: "14px", color: "#202223", marginBottom: "2px" }}>{action.label}</div>
-              <div style={{ fontSize: "12px", color: "#637381" }}>{action.description}</div>
-              {action.locked && (
-                <div style={{
-                  display: "inline-block",
-                  marginTop: "6px",
-                  padding: "2px 8px",
-                  borderRadius: "8px",
-                  fontSize: "11px",
-                  fontWeight: 600,
-                  backgroundColor: "#fef3f2",
-                  color: "#d72c0d",
-                }}>
-                  Upgrade Required
+              <span style={{
+                display: "inline-flex", alignItems: "center", justifyContent: "center",
+                width: "40px", height: "40px", borderRadius: "10px", fontSize: "20px", flexShrink: 0,
+                backgroundColor: i === 0 ? "#2c6ecb" : "#f3f4f6",
+                color: i === 0 ? "white" : undefined,
+              }}>{action.icon}</span>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: "14px", color: "#202223", marginBottom: "2px" }}>
+                  {action.label}
+                  {action.locked && <span style={{ fontSize: "11px", color: "#d72c0d", marginLeft: "6px" }}>PRO</span>}
                 </div>
-              )}
-            </div>
+                <div style={{ fontSize: "12px", color: "#637381" }}>{action.description}</div>
+              </div>
+            </button>
           ))}
         </div>
       </s-section>
 
-      {/* Recent Edits */}
+      {/* ─── RECENT EDITS ─── */}
       <s-section heading="Recent Bulk Edits">
         {recentEdits.length === 0 ? (
-          <s-box padding="loose" borderWidth="base" borderRadius="base">
-            <s-stack direction="block" gap="base" align="center">
-              <s-text tone="subdued">No bulk edits yet. Start by editing some prices!</s-text>
-              <s-button variant="primary" onClick={() => navigate("/app/bulk-edit")}>
-                Start Bulk Edit
-              </s-button>
-            </s-stack>
-          </s-box>
+          <div style={{ padding: "24px", textAlign: "center", borderRadius: "12px", border: "1px dashed #d1d5db", backgroundColor: "#fafbfc" }}>
+            <div style={{ fontSize: "14px", color: "#637381", marginBottom: "12px" }}>No bulk edits yet. Start by editing some products!</div>
+            <button
+              onClick={() => navigate("/app/bulk-edit")}
+              style={{ padding: "10px 24px", borderRadius: "8px", border: "none", backgroundColor: "#2c6ecb", color: "white", fontSize: "14px", fontWeight: 600, cursor: "pointer" }}
+            >
+              Start Bulk Edit
+            </button>
+          </div>
         ) : (
           <s-section padding="none">
             <s-table>
@@ -438,39 +408,71 @@ export default function Dashboard() {
         )}
       </s-section>
 
-      {/* Upgrade CTA for free users */}
-      {currentPlan === "free" && historyCount > 0 && (
-        <s-section>
-          <div style={{
-            padding: "24px",
-            borderRadius: "12px",
-            background: "linear-gradient(135deg, #2c6ecb 0%, #7c3aed 100%)",
-            color: "white",
-            textAlign: "center",
-          }}>
-            <div style={{ fontSize: "20px", fontWeight: 800, marginBottom: "8px" }}>Need more bulk edits?</div>
-            <div style={{ fontSize: "14px", opacity: 0.9, marginBottom: "16px" }}>
-              Upgrade to Unlimited for unrestricted product edits, or Pro for automation rules.
+      {/* ─── STORE OVERVIEW: Moved to bottom ─── */}
+      <s-section heading="Store Overview">
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "10px" }}>
+          {statCards.map((stat, i) => (
+            <div key={i} style={{
+              padding: "16px",
+              borderRadius: "10px",
+              border: "1px solid #e8ecf0",
+              backgroundColor: "#fafbfc",
+            }}>
+              <div style={{ fontSize: "13px", color: "#637381", marginBottom: "4px" }}>{stat.icon} {stat.label}</div>
+              <div style={{ fontSize: "22px", fontWeight: 700, color: "#202223" }}>{stat.value}</div>
             </div>
-            <button
-              onClick={() => navigate("/app/billing")}
-              style={{
-                padding: "12px 32px",
-                borderRadius: "8px",
-                border: "2px solid white",
-                backgroundColor: "transparent",
-                color: "white",
-                fontWeight: 700,
-                fontSize: "14px",
-                cursor: "pointer",
-              }}
-            >
-              View Plans →
-            </button>
-          </div>
-        </s-section>
-      )}
+          ))}
+        </div>
+      </s-section>
 
+      {/* ─── PLAN BANNER ─── */}
+      <s-section>
+        <div style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          padding: "14px 18px",
+          borderRadius: "10px",
+          backgroundColor: "#f8fafb",
+          border: "1px solid #e8ecf0",
+          flexWrap: "wrap",
+          gap: "12px",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <span style={{
+              display: "inline-block",
+              padding: "3px 10px",
+              borderRadius: "6px",
+              fontSize: "12px",
+              fontWeight: 700,
+              backgroundColor: currentPlan === "free" ? "#e4e5e7" : currentPlan === "premium" ? "#7c3aed" : "#2c6ecb",
+              color: currentPlan === "free" ? "#637381" : "white",
+            }}>
+              {planName}
+            </span>
+            <span style={{ fontSize: "13px", color: "#637381" }}>
+              {productsPerEdit === Infinity ? "Unlimited" : productsPerEdit} products/edit · {monthlyEdits} edits this month
+            </span>
+          </div>
+          <button
+            onClick={() => navigate("/app/billing")}
+            style={{
+              padding: "6px 16px",
+              borderRadius: "6px",
+              border: "1px solid #d1d5db",
+              backgroundColor: "white",
+              color: "#374151",
+              fontSize: "12px",
+              fontWeight: 600,
+              cursor: "pointer",
+            }}
+          >
+            {currentPlan === "free" ? "Upgrade Plan" : "Manage Plan"}
+          </button>
+        </div>
+      </s-section>
+
+      {/* ─── ASIDE: Connected Store ─── */}
       <s-section slot="aside" heading="Connected Store">
         <s-paragraph>
           <s-text fontWeight="bold">{shop}</s-text>
@@ -482,13 +484,25 @@ export default function Dashboard() {
         </s-paragraph>
       </s-section>
 
+      {/* ─── ASIDE: What You Can Edit ─── */}
+      <s-section slot="aside" heading="What You Can Edit">
+        <s-unordered-list>
+          <s-list-item>Prices & Compare-at Prices</s-list-item>
+          <s-list-item>Titles, Vendors, Product Types</s-list-item>
+          <s-list-item>Tags (add, remove, replace)</s-list-item>
+          <s-list-item>SKUs & Barcodes</s-list-item>
+          <s-list-item>Status (Active/Draft/Archived)</s-list-item>
+          <s-list-item>Google Shopping Custom Labels</s-list-item>
+          <s-list-item>Meta/Facebook Custom Labels</s-list-item>
+          <s-list-item>Custom Metafields</s-list-item>
+        </s-unordered-list>
+      </s-section>
+
+      {/* ─── ASIDE: Tips ─── */}
       <s-section slot="aside" heading="Tips">
         <s-unordered-list>
           <s-list-item>
-            Use <s-text fontWeight="bold">Quick Presets</s-text> in Bulk Edit for common operations like "10% off"
-          </s-list-item>
-          <s-list-item>
-            Click any price on the <s-link href="/app/products">Products page</s-link> to edit it inline
+            Use <s-text fontWeight="bold">Quick Presets</s-text> for common operations like "10% off"
           </s-list-item>
           <s-list-item>
             Every change is recorded in <s-link href="/app/history">History</s-link> and can be undone
