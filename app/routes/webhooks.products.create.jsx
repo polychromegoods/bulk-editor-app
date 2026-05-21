@@ -4,7 +4,7 @@ import prisma from "../db.server";
 export const action = async ({ request }) => {
   const { shop, topic, payload, admin } = await authenticate.webhook(request);
   if (!admin) { throw new Response(); }
-  console.log(`[Webhook] products/update received for shop: ${shop}, product: ${payload.id}`);
+  console.log(`[Webhook] products/create received for shop: ${shop}, product: ${payload.id}`);
   try {
     const shopPlan = await prisma.shopPlan.findUnique({ where: { shop } });
     if (!shopPlan || (shopPlan.plan !== "pro" && shopPlan.plan !== "premium")) {
@@ -12,8 +12,8 @@ export const action = async ({ request }) => {
       return new Response("OK", { status: 200 });
     }
     const allRules = await prisma.automationRule.findMany({ where: { shop, enabled: true } });
-    // Only run rules that trigger on product update (or updated_or_created)
-    const rules = allRules.filter(r => !r.trigger || r.trigger === "product_updated_or_created");
+    // Only run rules that trigger on product creation
+    const rules = allRules.filter(r => r.trigger === "product_created" || r.trigger === "product_updated_or_created");
     if (rules.length === 0) {
       return new Response("OK", { status: 200 });
     }
@@ -122,7 +122,7 @@ export const action = async ({ request }) => {
         console.error(`[Webhook] Error applying rule "${rule.name}":`, err);
       }
     }
-  } catch (err) { console.error(`[Webhook] Error processing products/update:`, err); }
+  } catch (err) { console.error(`[Webhook] Error processing products/create:`, err); }
   return new Response("OK", { status: 200 });
 };
 

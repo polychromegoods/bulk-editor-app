@@ -75,6 +75,7 @@ model AutomationRule {
   enabled     Boolean  @default(true)
   conditions  String   @default("[]")
   actions     String   @default("[]")
+  trigger     String   @default("product_updated_or_created")
   lastRun     DateTime?
   runCount    Int      @default(0)
   createdAt   DateTime @default(now())

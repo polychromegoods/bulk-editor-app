@@ -850,6 +850,19 @@ const FILTER_FIELDS = [
   { value: "inventoryQuantity", label: "Inventory", type: "number" },
   { value: "weight", label: "Weight", type: "number" },
   { value: "templateSuffix", label: "Product Template", type: "text" },
+  // ── Metafield filters (Google Shopping) ──
+  { value: "metafield::mm-google-shopping::custom_label_0", label: "Google Custom Label 0", type: "text", isMetafield: true },
+  { value: "metafield::mm-google-shopping::custom_label_1", label: "Google Custom Label 1", type: "text", isMetafield: true },
+  { value: "metafield::mm-google-shopping::custom_label_2", label: "Google Custom Label 2", type: "text", isMetafield: true },
+  { value: "metafield::mm-google-shopping::custom_label_3", label: "Google Custom Label 3", type: "text", isMetafield: true },
+  { value: "metafield::mm-google-shopping::custom_label_4", label: "Google Custom Label 4", type: "text", isMetafield: true },
+  { value: "metafield::mm-google-shopping::custom_product_type", label: "Google Custom Product Type", type: "text", isMetafield: true },
+  // ── Metafield filters (Meta/Facebook) ──
+  { value: "metafield::facebook::custom_label_0", label: "Meta Custom Label 0", type: "text", isMetafield: true },
+  { value: "metafield::facebook::custom_label_1", label: "Meta Custom Label 1", type: "text", isMetafield: true },
+  { value: "metafield::facebook::custom_label_2", label: "Meta Custom Label 2", type: "text", isMetafield: true },
+  { value: "metafield::facebook::custom_label_3", label: "Meta Custom Label 3", type: "text", isMetafield: true },
+  { value: "metafield::facebook::custom_label_4", label: "Meta Custom Label 4", type: "text", isMetafield: true },
 ];
 
 const TEXT_OPERATORS = [
@@ -888,33 +901,43 @@ function getOperatorsForField(fieldValue) {
 
 function evaluateFilter(product, rule) {
   let value;
-  switch (rule.field) {
-    case "price":
-      value = product.variants?.edges?.[0]?.node?.price || "";
-      break;
-    case "compareAtPrice":
-      value = product.variants?.edges?.[0]?.node?.compareAtPrice || "";
-      break;
-    case "inventoryQuantity":
-      value = String(product.variants?.edges?.[0]?.node?.inventoryQuantity ?? "");
-      break;
-    case "sku":
-      value = product.variants?.edges?.[0]?.node?.sku || "";
-      break;
-    case "weight":
-      value = String(product.variants?.edges?.[0]?.node?.inventoryItem?.measurement?.weight?.value ?? "0");
-      break;
-    case "templateSuffix":
-      value = product.templateSuffix || "";
-      break;
-    case "variantTitle":
-      value = (product.variants?.edges || []).map(e => e.node?.title || "").join(", ");
-      break;
-    case "tags":
-      value = (product.tags || []).join(", ");
-      break;
-    default:
-      value = product[rule.field] || "";
+  // Handle metafield filters
+  if (rule.field.startsWith("metafield::")) {
+    const parts = rule.field.split("::");
+    const namespace = parts[1];
+    const key = parts[2];
+    const mfEdges = product.metafields?.edges || [];
+    const mf = mfEdges.find(e => e.node.namespace === namespace && e.node.key === key);
+    value = mf?.node?.value || "";
+  } else {
+    switch (rule.field) {
+      case "price":
+        value = product.variants?.edges?.[0]?.node?.price || "";
+        break;
+      case "compareAtPrice":
+        value = product.variants?.edges?.[0]?.node?.compareAtPrice || "";
+        break;
+      case "inventoryQuantity":
+        value = String(product.variants?.edges?.[0]?.node?.inventoryQuantity ?? "");
+        break;
+      case "sku":
+        value = product.variants?.edges?.[0]?.node?.sku || "";
+        break;
+      case "weight":
+        value = String(product.variants?.edges?.[0]?.node?.inventoryItem?.measurement?.weight?.value ?? "0");
+        break;
+      case "templateSuffix":
+        value = product.templateSuffix || "";
+        break;
+      case "variantTitle":
+        value = (product.variants?.edges || []).map(e => e.node?.title || "").join(", ");
+        break;
+      case "tags":
+        value = (product.tags || []).join(", ");
+        break;
+      default:
+        value = product[rule.field] || "";
+    }
   }
 
   const v = String(value).toLowerCase();
@@ -1776,7 +1799,15 @@ export default function BulkEdit() {
                 <div key={rule.id} className="filter-rule-row" style={styles.filterRule}>
                   <span style={{ fontSize: "12px", fontWeight: 600, color: "#637381", minWidth: "40px" }}>{idx === 0 ? "Where" : "AND"}</span>
                   <select value={rule.field} onChange={(e) => updateFilterRule(rule.id, "field", e.target.value)} style={{ ...styles.select, width: "auto", minWidth: "120px" }}>
-                    {FILTER_FIELDS.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
+                    <optgroup label="Product Fields">
+                      {FILTER_FIELDS.filter(f => !f.isMetafield).map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
+                    </optgroup>
+                    <optgroup label="Google Shopping">
+                      {FILTER_FIELDS.filter(f => f.isMetafield && f.value.includes("google")).map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
+                    </optgroup>
+                    <optgroup label="Meta / Facebook">
+                      {FILTER_FIELDS.filter(f => f.isMetafield && f.value.includes("facebook")).map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
+                    </optgroup>
                   </select>
                   <select value={rule.operator} onChange={(e) => updateFilterRule(rule.id, "operator", e.target.value)} style={{ ...styles.select, width: "auto", minWidth: "140px" }}>
                     {ops.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}

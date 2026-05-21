@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useLoaderData, useFetcher, useNavigate } from "react-router";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
@@ -15,7 +15,7 @@ export const loader = async ({ request }) => {
   }
   const plan = shopPlan.plan || "free";
 
-  // Fetch products for filter preview (same as bulk edit)
+  // Fetch products for filter preview
   const response = await admin.graphql(
     `#graphql
     query ($first: Int!) {
@@ -92,6 +92,7 @@ export const action = async ({ request }) => {
     const name = formData.get("name");
     const filterRules = formData.get("filterRules") || "[]";
     const modifications = formData.get("modifications") || "[]";
+    const trigger = formData.get("trigger") || "updated_or_created";
 
     const rule = await prisma.automationRule.create({
       data: {
@@ -100,6 +101,7 @@ export const action = async ({ request }) => {
         enabled: true,
         conditions: filterRules,
         actions: modifications,
+        trigger,
       },
     });
     return { success: true, rule };
@@ -268,22 +270,22 @@ function matchValue(value, rule) {
 }
 
 /* ═══════════════════════════════════════════════════════════════
+   TRIGGER OPTIONS
+   ═══════════════════════════════════════════════════════════════ */
+const TRIGGER_OPTIONS = [
+  { value: "updated_or_created", label: "When a product is updated or created" },
+  { value: "created", label: "When a product is created" },
+];
+
+function getTriggerLabel(triggerValue) {
+  const opt = TRIGGER_OPTIONS.find((t) => t.value === triggerValue);
+  return opt ? opt.label : "When a product is updated or created";
+}
+
+/* ═══════════════════════════════════════════════════════════════
    STYLES
    ═══════════════════════════════════════════════════════════════ */
 const styles = {
-  stepIndicator: (active, completed, enabled) => ({
-    display: "flex", alignItems: "center", gap: "8px", padding: "10px 20px", borderRadius: "24px", border: "none",
-    cursor: enabled ? "pointer" : "default", fontWeight: active ? "700" : "500",
-    backgroundColor: active ? "#2c6ecb" : completed ? "#e3f1df" : "transparent",
-    color: active ? "white" : completed ? "#1a7f37" : enabled ? "#202223" : "#babec3",
-    fontSize: "14px", transition: "all 0.2s ease", opacity: enabled ? 1 : 0.5,
-  }),
-  stepNumber: (active, completed) => ({
-    display: "inline-flex", alignItems: "center", justifyContent: "center", width: "24px", height: "24px",
-    borderRadius: "50%", fontSize: "12px", fontWeight: "700",
-    backgroundColor: active ? "rgba(255,255,255,0.2)" : completed ? "#1a7f37" : "#e4e5e7",
-    color: active ? "white" : completed ? "white" : "#637381",
-  }),
   input: { width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #c4cdd5", fontSize: "14px", outline: "none", boxSizing: "border-box" },
   select: { width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid #c4cdd5", fontSize: "14px", outline: "none", backgroundColor: "white", boxSizing: "border-box", appearance: "auto", WebkitAppearance: "auto" },
   primaryBtn: (enabled) => ({
@@ -304,6 +306,10 @@ const styles = {
     backgroundColor: tone === "success" ? "#e3f1df" : tone === "critical" ? "#fef3f2" : tone === "warning" ? "#fef8e8" : "#e4e5e7",
     color: tone === "success" ? "#1a7f37" : tone === "critical" ? "#d72c0d" : tone === "warning" ? "#916a00" : "#637381",
   }),
+  sectionTitle: { fontSize: "14px", fontWeight: 700, color: "#202223", marginBottom: "12px" },
+  sectionDesc: { fontSize: "13px", color: "#637381", marginBottom: "16px" },
+  formField: { marginBottom: "20px" },
+  label: { fontSize: "13px", fontWeight: 600, color: "#202223", marginBottom: "6px", display: "block" },
 };
 
 /* ═══════════════════════════════════════════════════════════════
@@ -315,14 +321,14 @@ export default function Automations() {
   const navigate = useNavigate();
   const shopify = useAppBridge();
 
-  const [showCreator, setShowCreator] = useState(false);
-  const [step, setStep] = useState(1);
+  // Views: "landing" | "creator"
+  const [view, setView] = useState("landing");
 
-  // Step 1: Filter conditions
-  const [filterRules, setFilterRules] = useState([]);
-  // Step 2: Modifications
+  // Rule form state (single-page form)
   const [ruleName, setRuleName] = useState("");
-  const [ruleNameTouched, setRuleNameTouched] = useState(false);
+  const [ruleEnabled, setRuleEnabled] = useState(true);
+  const [trigger, setTrigger] = useState("updated_or_created");
+  const [filterRules, setFilterRules] = useState([]);
   const [modifications, setModifications] = useState([]);
 
   const isSubmitting = fetcher.state !== "idle";
@@ -331,30 +337,34 @@ export default function Automations() {
   // Reset form after successful creation
   useEffect(() => {
     if (actionData?.success && actionData?.rule) {
-      setShowCreator(false);
-      setStep(1);
-      setFilterRules([]);
-      setModifications([]);
-      setRuleName("");
-      setRuleNameTouched(false);
-      shopify.toast.show("Automation rule created!");
+      setView("landing");
+      resetForm();
+      shopify.toast.show("Rule created successfully!");
     }
     if (actionData?.error) {
       shopify.toast.show(actionData.error, { isError: true });
     }
   }, [actionData]);
 
+  const resetForm = () => {
+    setRuleName("");
+    setRuleEnabled(true);
+    setTrigger("updated_or_created");
+    setFilterRules([]);
+    setModifications([]);
+  };
+
   // Plan gating
   if (currentPlan !== "pro" && currentPlan !== "premium") {
     return (
-      <s-page title="Automation Rules">
+      <s-page title="Automations">
         <s-section>
           <s-box padding="loose">
             <div style={{ textAlign: "center", padding: "40px 20px" }}>
               <div style={{ fontSize: "48px", marginBottom: "16px" }}>🤖</div>
               <div style={{ fontSize: "20px", fontWeight: 700, marginBottom: "8px" }}>Automation Rules</div>
               <div style={{ fontSize: "14px", color: "#637381", marginBottom: "24px", maxWidth: "480px", margin: "0 auto 24px" }}>
-                Automation rules automatically adjust prices when products are created or updated.
+                Automation rules automatically adjust product data when products are created or updated.
                 Set conditions and actions once — they run automatically via webhooks.
               </div>
               <div style={{ padding: "16px", backgroundColor: "#fef8e8", borderRadius: "12px", marginBottom: "24px", maxWidth: "400px", margin: "0 auto 24px" }}>
@@ -437,7 +447,7 @@ export default function Automations() {
       return;
     }
     if (filterRules.length === 0) {
-      shopify.toast.show("Please add at least one filter condition", { isError: true });
+      shopify.toast.show("Please add at least one search parameter", { isError: true });
       return;
     }
     if (modifications.length === 0) {
@@ -448,6 +458,7 @@ export default function Automations() {
       {
         intent: "create_rule",
         name: ruleName,
+        trigger,
         filterRules: JSON.stringify(filterRules),
         modifications: JSON.stringify(modifications),
       },
@@ -464,359 +475,316 @@ export default function Automations() {
     return { conditions, actions };
   };
 
+  /* ════════════════════════════════════════════════════════════════
+     LANDING VIEW — "Product data" category with "Product rules"
+     ════════════════════════════════════════════════════════════════ */
+  if (view === "landing") {
+    return (
+      <s-page title="Automations">
+        {/* Category header */}
+        <s-section>
+          <s-box padding="base">
+            <div style={{ marginBottom: "20px" }}>
+              <div style={{ fontSize: "13px", color: "#637381", textTransform: "uppercase", letterSpacing: "0.5px", fontWeight: 600, marginBottom: "8px" }}>Product data</div>
+              <div style={{ fontSize: "13px", color: "#637381" }}>
+                Automatically update product information when products are created or updated in your store.
+              </div>
+            </div>
+
+            {/* Product rules card */}
+            <div style={{ border: "1px solid #e1e3e5", borderRadius: "12px", padding: "20px", backgroundColor: "white", display: "flex", alignItems: "center", gap: "16px", cursor: "pointer", transition: "border-color 0.15s" }} onClick={() => setView("creator")}>
+              <div style={{ width: "48px", height: "48px", borderRadius: "10px", backgroundColor: "#f0f5ff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "24px", flexShrink: 0 }}>
+                📋
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: "15px", fontWeight: 700, color: "#202223", marginBottom: "4px" }}>Product rules</div>
+                <div style={{ fontSize: "13px", color: "#637381" }}>
+                  Create rules that automatically modify product data when products match specific conditions.
+                </div>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: "12px", flexShrink: 0 }}>
+                {rules.length > 0 && (
+                  <span style={{ fontSize: "13px", color: "#637381", fontWeight: 500 }}>{rules.length} rule{rules.length !== 1 ? "s" : ""}</span>
+                )}
+                <button style={styles.primaryBtn(true)} onClick={(e) => { e.stopPropagation(); setView("creator"); }}>
+                  Create rule
+                </button>
+              </div>
+            </div>
+          </s-box>
+        </s-section>
+
+        {/* ════════════════════ EXISTING RULES LIST ════════════════════ */}
+        {rules.length > 0 && (
+          <s-section heading={`Your rules (${rules.length})`}>
+            <s-box padding="base">
+              {rules.map((rule) => {
+                const { conditions, actions } = parseRuleDisplay(rule);
+                return (
+                  <div key={rule.id} style={{ ...styles.card, display: "flex", alignItems: "flex-start", gap: "16px" }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
+                        <div style={{ fontSize: "15px", fontWeight: 700, color: "#202223" }}>{rule.name}</div>
+                        <span style={styles.badge(rule.enabled ? "success" : "info")}>
+                          {rule.enabled ? "Active" : "Paused"}
+                        </span>
+                      </div>
+                      {/* Trigger info */}
+                      <div style={{ fontSize: "12px", color: "#2c6ecb", fontWeight: 500, marginBottom: "6px", display: "flex", alignItems: "center", gap: "4px" }}>
+                        <span>⚡</span> {getTriggerLabel(rule.trigger || "updated_or_created")}
+                      </div>
+                      <div style={{ fontSize: "13px", color: "#637381", marginBottom: "4px" }}>
+                        <strong>When:</strong>{" "}
+                        {conditions.map((c, i) => {
+                          const fieldDef = FILTER_FIELDS.find((f) => f.value === c.field);
+                          const opDef = getOperatorsForField(c.field).find((o) => o.value === c.operator);
+                          return (
+                            <span key={i}>
+                              {i > 0 && " AND "}
+                              {fieldDef?.label || c.field} {opDef?.label || c.operator} "{c.value}"
+                            </span>
+                          );
+                        })}
+                        {conditions.length === 0 && "All products"}
+                      </div>
+                      <div style={{ fontSize: "13px", color: "#637381", marginBottom: "4px" }}>
+                        <strong>Then:</strong>{" "}
+                        {actions.map((a, i) => {
+                          const fieldDef = getFieldDef(a.field);
+                          const typeDef = getChangeTypes(a.field).find((ct) => ct.value === a.type);
+                          return (
+                            <span key={i}>
+                              {i > 0 && ", "}
+                              {fieldDef?.label || a.field}: {typeDef?.label || a.type} {a.value}
+                              {a.rounding && a.rounding !== "none" && ` (round to .${a.rounding})`}
+                            </span>
+                          );
+                        })}
+                      </div>
+                      <div style={{ fontSize: "12px", color: "#919eab", marginTop: "6px" }}>
+                        Runs: {rule.runCount || 0} · Created: {new Date(rule.createdAt).toLocaleDateString()}
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", gap: "6px", flexShrink: 0 }}>
+                      <button style={styles.secondaryBtn} onClick={() => fetcher.submit({ intent: "toggle_rule", ruleId: rule.id }, { method: "POST" })}>
+                        {rule.enabled ? "Pause" : "Enable"}
+                      </button>
+                      <button style={styles.dangerBtn(true)} onClick={() => fetcher.submit({ intent: "delete_rule", ruleId: rule.id }, { method: "POST" })}>
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </s-box>
+          </s-section>
+        )}
+      </s-page>
+    );
+  }
+
+  /* ════════════════════════════════════════════════════════════════
+     CREATOR VIEW — Single-page form (Ablestar-style)
+     ════════════════════════════════════════════════════════════════ */
   return (
-    <s-page title="Automation Rules">
-      {/* Info banner */}
+    <s-page title="Create product rule" backAction={{ url: "#", onAction: () => setView("landing") }}>
+      {/* ─── Rule Name & Status ─── */}
       <s-section>
         <s-box padding="base">
-          <div style={{ display: "flex", alignItems: "center", gap: "12px", padding: "12px 16px", backgroundColor: "#f0f5ff", borderRadius: "10px", border: "1px solid #c9d8f0" }}>
-            <span style={{ fontSize: "20px" }}>🤖</span>
+          <div style={{ display: "flex", gap: "16px", alignItems: "flex-start" }}>
+            {/* Name */}
             <div style={{ flex: 1 }}>
-              <div style={{ fontSize: "14px", fontWeight: 600, color: "#202223" }}>Automation rules run automatically</div>
-              <div style={{ fontSize: "13px", color: "#637381", marginTop: "2px" }}>
-                When a product is created or updated in your store, all enabled rules are checked. If a product matches a rule's filters, the modifications are applied automatically.
-              </div>
+              <label style={styles.label}>Rule name</label>
+              <input
+                style={styles.input}
+                type="text"
+                placeholder="e.g., Tag 'sale' products get 20% off"
+                value={ruleName}
+                onChange={(e) => setRuleName(e.target.value)}
+              />
+            </div>
+            {/* Status toggle */}
+            <div style={{ flexShrink: 0, paddingTop: "24px" }}>
+              <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer", fontSize: "14px", fontWeight: 500, color: "#202223" }}>
+                <input
+                  type="checkbox"
+                  checked={ruleEnabled}
+                  onChange={(e) => setRuleEnabled(e.target.checked)}
+                  style={{ width: "18px", height: "18px", accentColor: "#2c6ecb" }}
+                />
+                Enabled
+              </label>
             </div>
           </div>
         </s-box>
       </s-section>
 
-      {/* Create new rule button */}
-      {!showCreator && (
-        <s-section>
-          <s-box padding="base">
-            <button style={styles.primaryBtn(true)} onClick={() => setShowCreator(true)}>
-              + Create New Automation Rule
-            </button>
-          </s-box>
-        </s-section>
-      )}
+      {/* ─── Trigger ─── */}
+      <s-section heading="Trigger">
+        <s-box padding="base">
+          <div style={styles.formField}>
+            <label style={styles.label}>Run this rule</label>
+            <select
+              style={styles.select}
+              value={trigger}
+              onChange={(e) => setTrigger(e.target.value)}
+            >
+              {TRIGGER_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+            <div style={{ fontSize: "12px", color: "#637381", marginTop: "6px" }}>
+              {trigger === "created"
+                ? "This rule will only run when a new product is created in your store."
+                : "This rule will run when a product is created or when an existing product is updated."
+              }
+            </div>
+          </div>
+        </s-box>
+      </s-section>
 
-      {/* ════════════════════ RULE CREATOR WIZARD ════════════════════ */}
-      {showCreator && (
-        <>
-          {/* Step indicators */}
-          <s-section>
-            <s-box padding="base">
-              <div style={{ display: "flex", gap: "4px", justifyContent: "center", flexWrap: "wrap" }}>
-                {[
-                  { num: 1, label: "Filter Products" },
-                  { num: 2, label: "Set Modifications" },
-                  { num: 3, label: "Review & Save" },
-                ].map(({ num, label }) => {
-                  const active = step === num;
-                  const completed = step > num;
-                  const enabled = num <= step;
-                  return (
-                    <button key={num} style={styles.stepIndicator(active, completed, enabled)} onClick={() => enabled && setStep(num)}>
-                      <span style={styles.stepNumber(active, completed)}>{completed ? "✓" : num}</span>
-                      {label}
-                    </button>
-                  );
-                })}
+      {/* ─── Search Parameters (Filters) ─── */}
+      <s-section heading="Search parameters">
+        <s-box padding="base">
+          <div style={{ fontSize: "13px", color: "#637381", marginBottom: "16px" }}>
+            Define which products this rule applies to. Products matching ALL conditions will be affected.
+          </div>
+
+          {filterRules.map((rule) => {
+            const fieldDef = FILTER_FIELDS.find((f) => f.value === rule.field);
+            const operators = getOperatorsForField(rule.field);
+            const needsValue = !["is_empty", "is_not_empty"].includes(rule.operator);
+            const needsValue2 = rule.operator === "between";
+            return (
+              <div key={rule.id} style={styles.filterRule}>
+                <select style={{ ...styles.select, flex: "0 0 150px" }} value={rule.field} onChange={(e) => updateFilterRule(rule.id, "field", e.target.value)}>
+                  {FILTER_FIELDS.map((f) => (
+                    <option key={f.value} value={f.value}>{f.label}</option>
+                  ))}
+                </select>
+                <select style={{ ...styles.select, flex: "0 0 160px" }} value={rule.operator} onChange={(e) => updateFilterRule(rule.id, "operator", e.target.value)}>
+                  {operators.map((op) => (
+                    <option key={op.value} value={op.value}>{op.label}</option>
+                  ))}
+                </select>
+                {needsValue && fieldDef?.type === "select" ? (
+                  <select style={{ ...styles.select, flex: 1 }} value={rule.value} onChange={(e) => updateFilterRule(rule.id, "value", e.target.value)}>
+                    <option value="">Select...</option>
+                    {fieldDef.options.map((opt) => (
+                      <option key={opt} value={opt}>{opt}</option>
+                    ))}
+                  </select>
+                ) : needsValue ? (
+                  <input style={{ ...styles.input, flex: 1 }} type={fieldDef?.type === "number" ? "number" : "text"} placeholder="Value..." value={rule.value} onChange={(e) => updateFilterRule(rule.id, "value", e.target.value)} />
+                ) : null}
+                {needsValue2 && (
+                  <input style={{ ...styles.input, flex: 1 }} type="number" placeholder="Max..." value={rule.value2} onChange={(e) => updateFilterRule(rule.id, "value2", e.target.value)} />
+                )}
+                <button style={{ border: "none", background: "none", cursor: "pointer", fontSize: "18px", color: "#637381", padding: "4px" }} onClick={() => removeFilterRule(rule.id)}>✕</button>
               </div>
-            </s-box>
-          </s-section>
+            );
+          })}
 
-          {/* ──── STEP 1: FILTER CONDITIONS ──── */}
-          {step === 1 && (
-            <s-section>
-              <s-box padding="base">
-                <div style={{ marginBottom: "16px" }}>
-                  <div style={{ fontSize: "16px", fontWeight: 700, marginBottom: "4px" }}>Filter Conditions</div>
-                  <div style={{ fontSize: "13px", color: "#637381" }}>
-                    Define which products this rule applies to. Products matching ALL conditions will be affected when they are created or updated.
-                  </div>
-                </div>
+          <button style={{ ...styles.secondaryBtn, marginTop: "8px" }} onClick={addFilterRule}>+ Add condition</button>
 
-                {/* Filter rules */}
-                {filterRules.map((rule) => {
-                  const fieldDef = FILTER_FIELDS.find((f) => f.value === rule.field);
-                  const operators = getOperatorsForField(rule.field);
-                  const needsValue = !["is_empty", "is_not_empty"].includes(rule.operator);
-                  const needsValue2 = rule.operator === "between";
-                  return (
-                    <div key={rule.id} style={styles.filterRule}>
-                      <select style={{ ...styles.select, flex: "0 0 150px" }} value={rule.field} onChange={(e) => updateFilterRule(rule.id, "field", e.target.value)}>
-                        {FILTER_FIELDS.map((f) => (
-                          <option key={f.value} value={f.value}>{f.label}</option>
-                        ))}
-                      </select>
-                      <select style={{ ...styles.select, flex: "0 0 160px" }} value={rule.operator} onChange={(e) => updateFilterRule(rule.id, "operator", e.target.value)}>
-                        {operators.map((op) => (
-                          <option key={op.value} value={op.value}>{op.label}</option>
-                        ))}
-                      </select>
-                      {needsValue && fieldDef?.type === "select" ? (
-                        <select style={{ ...styles.select, flex: 1 }} value={rule.value} onChange={(e) => updateFilterRule(rule.id, "value", e.target.value)}>
-                          <option value="">Select...</option>
-                          {fieldDef.options.map((opt) => (
-                            <option key={opt} value={opt}>{opt}</option>
-                          ))}
-                        </select>
-                      ) : needsValue ? (
-                        <input style={{ ...styles.input, flex: 1 }} type={fieldDef?.type === "number" ? "number" : "text"} placeholder="Value..." value={rule.value} onChange={(e) => updateFilterRule(rule.id, "value", e.target.value)} />
-                      ) : null}
-                      {needsValue2 && (
-                        <input style={{ ...styles.input, flex: 1 }} type="number" placeholder="Max..." value={rule.value2} onChange={(e) => updateFilterRule(rule.id, "value2", e.target.value)} />
-                      )}
-                      <button style={{ border: "none", background: "none", cursor: "pointer", fontSize: "18px", color: "#637381", padding: "4px" }} onClick={() => removeFilterRule(rule.id)}>✕</button>
-                    </div>
-                  );
-                })}
-
-                <div style={{ display: "flex", gap: "8px", marginTop: "12px" }}>
-                  <button style={styles.secondaryBtn} onClick={addFilterRule}>+ Add Condition</button>
-                </div>
-
-                {/* Preview of matched products */}
-                <div style={{ marginTop: "20px", padding: "12px 16px", backgroundColor: "#f9fafb", borderRadius: "8px", border: "1px solid #e1e3e5" }}>
-                  <div style={{ fontSize: "13px", fontWeight: 600, color: "#202223" }}>
-                    Preview: {matchedProducts.length} product{matchedProducts.length !== 1 ? "s" : ""} currently match{matchedProducts.length === 1 ? "es" : ""}
-                  </div>
-                  {matchedProducts.length > 0 && matchedProducts.length <= 10 && (
-                    <div style={{ marginTop: "8px", fontSize: "13px", color: "#637381" }}>
-                      {matchedProducts.map((p) => p.title).join(", ")}
-                    </div>
-                  )}
-                  {matchedProducts.length > 10 && (
-                    <div style={{ marginTop: "8px", fontSize: "13px", color: "#637381" }}>
-                      {matchedProducts.slice(0, 10).map((p) => p.title).join(", ")} and {matchedProducts.length - 10} more...
-                    </div>
-                  )}
-                </div>
-
-                <div style={{ display: "flex", gap: "8px", marginTop: "16px", justifyContent: "flex-end" }}>
-                  <button style={styles.secondaryBtn} onClick={() => { setShowCreator(false); setStep(1); setFilterRules([]); setModifications([]); setRuleName(""); setRuleNameTouched(false); }}>Cancel</button>
-                  <button style={styles.primaryBtn(filterRules.length > 0)} onClick={() => filterRules.length > 0 && setStep(2)} disabled={filterRules.length === 0}>
-                    Next: Set Modifications →
-                  </button>
-                </div>
-              </s-box>
-            </s-section>
-          )}
-
-          {/* ──── STEP 2: MODIFICATIONS ──── */}
-          {step === 2 && (
-            <s-section>
-              <s-box padding="base">
-                <div style={{ marginBottom: "16px" }}>
-                  <div style={{ fontSize: "16px", fontWeight: 700, marginBottom: "4px" }}>Modifications</div>
-                  <div style={{ fontSize: "13px", color: "#637381" }}>
-                    Define what changes to apply when a matching product is created or updated.
-                  </div>
-                </div>
-
-                {modifications.map((mod) => {
-                  const fieldDef = getFieldDef(mod.field);
-                  const changeTypes = getChangeTypes(mod.field);
-                  return (
-                    <div key={mod.id} style={{ ...styles.card, position: "relative" }}>
-                      <button style={{ position: "absolute", top: "8px", right: "8px", border: "none", background: "none", cursor: "pointer", fontSize: "18px", color: "#637381" }} onClick={() => removeMod(mod.id)}>✕</button>
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "12px" }}>
-                        <div>
-                          <label style={{ fontSize: "12px", fontWeight: 600, color: "#637381", marginBottom: "4px", display: "block" }}>Field</label>
-                          <select style={styles.select} value={mod.field} onChange={(e) => updateMod(mod.id, "field", e.target.value)}>
-                            {EDITABLE_FIELDS.map((f) => (
-                              <option key={f.value} value={f.value}>{f.icon} {f.label}</option>
-                            ))}
-                          </select>
-                        </div>
-                        <div>
-                          <label style={{ fontSize: "12px", fontWeight: 600, color: "#637381", marginBottom: "4px", display: "block" }}>Change Type</label>
-                          <select style={styles.select} value={mod.type} onChange={(e) => updateMod(mod.id, "type", e.target.value)}>
-                            {changeTypes.map((ct) => (
-                              <option key={ct.value} value={ct.value}>{ct.label}</option>
-                            ))}
-                          </select>
-                        </div>
-                      </div>
-                      <div style={{ display: "grid", gridTemplateColumns: fieldDef?.category === "numeric" ? "1fr 1fr" : "1fr", gap: "12px" }}>
-                        <div>
-                          <label style={{ fontSize: "12px", fontWeight: 600, color: "#637381", marginBottom: "4px", display: "block" }}>Value</label>
-                          {fieldDef?.category === "select" ? (
-                            <select style={styles.select} value={mod.value} onChange={(e) => updateMod(mod.id, "value", e.target.value)}>
-                              <option value="">Select...</option>
-                              {fieldDef.options.map((opt) => (
-                                <option key={opt} value={opt}>{opt}</option>
-                              ))}
-                            </select>
-                          ) : (
-                            <input style={styles.input} type={fieldDef?.category === "numeric" ? "number" : "text"} placeholder={fieldDef?.category === "numeric" ? "0.00" : "Value..."} value={mod.value} onChange={(e) => updateMod(mod.id, "value", e.target.value)} />
-                          )}
-                        </div>
-                        {fieldDef?.category === "numeric" && (
-                          <div>
-                            <label style={{ fontSize: "12px", fontWeight: 600, color: "#637381", marginBottom: "4px", display: "block" }}>Rounding</label>
-                            <select style={styles.select} value={mod.rounding} onChange={(e) => updateMod(mod.id, "rounding", e.target.value)}>
-                              <option value="none">No rounding</option>
-                              <option value="99">Round to .99</option>
-                              <option value="95">Round to .95</option>
-                              <option value="whole">Round to whole</option>
-                            </select>
-                          </div>
-                        )}
-                      </div>
-                      {mod.type === "find_replace" && (
-                        <div style={{ marginTop: "12px" }}>
-                          <label style={{ fontSize: "12px", fontWeight: 600, color: "#637381", marginBottom: "4px", display: "block" }}>Replace With</label>
-                          <input style={styles.input} type="text" placeholder="Replacement text..." value={mod.value2 || ""} onChange={(e) => updateMod(mod.id, "value2", e.target.value)} />
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-
-                <button style={styles.secondaryBtn} onClick={addMod}>+ Add Modification</button>
-
-                <div style={{ display: "flex", gap: "8px", marginTop: "16px", justifyContent: "flex-end" }}>
-                  <button style={styles.secondaryBtn} onClick={() => setStep(1)}>← Back</button>
-                  <button style={styles.primaryBtn(modifications.length > 0)} onClick={() => modifications.length > 0 && setStep(3)} disabled={modifications.length === 0}>
-                    Next: Review & Save →
-                  </button>
-                </div>
-              </s-box>
-            </s-section>
-          )}
-
-          {/* ──── STEP 3: REVIEW & SAVE ──── */}
-          {step === 3 && (
-            <s-section>
-              <s-box padding="base">
-                <div style={{ marginBottom: "16px" }}>
-                  <div style={{ fontSize: "16px", fontWeight: 700, marginBottom: "4px" }}>Review & Save Rule</div>
-                  <div style={{ fontSize: "13px", color: "#637381" }}>
-                    Give your rule a name and review the configuration before saving.
-                  </div>
-                </div>
-
-                {/* Rule name */}
-                <div style={{ marginBottom: "20px" }}>
-                  <label style={{ fontSize: "13px", fontWeight: 600, color: "#202223", marginBottom: "6px", display: "block" }}>Rule Name <span style={{ color: "#d72c0d" }}>*</span></label>
-                  <input style={{ ...styles.input, ...(ruleNameTouched && ruleName.trim() === "" ? { borderColor: "#d72c0d" } : {}) }} type="text" placeholder="e.g., Tag 'sale' → 20% off" value={ruleName} onChange={(e) => setRuleName(e.target.value)} onBlur={() => setRuleNameTouched(true)} />
-                  {ruleNameTouched && ruleName.trim() === "" && (
-                    <div style={{ fontSize: "12px", color: "#d72c0d", marginTop: "4px" }}>Rule name is required to save the automation.</div>
-                  )}
-                </div>
-
-                {/* Summary */}
-                <div style={styles.card}>
-                  <div style={{ fontSize: "14px", fontWeight: 700, marginBottom: "12px" }}>When a product matches:</div>
-                  {filterRules.map((rule, i) => {
-                    const fieldDef = FILTER_FIELDS.find((f) => f.value === rule.field);
-                    const opDef = getOperatorsForField(rule.field).find((o) => o.value === rule.operator);
-                    return (
-                      <div key={i} style={{ padding: "6px 12px", backgroundColor: "#f0f5ff", borderRadius: "6px", marginBottom: "4px", fontSize: "13px" }}>
-                        <strong>{fieldDef?.label || rule.field}</strong> {opDef?.label || rule.operator} <strong>{rule.value}</strong>
-                        {rule.operator === "between" && <> and <strong>{rule.value2}</strong></>}
-                      </div>
-                    );
-                  })}
-                </div>
-
-                <div style={styles.card}>
-                  <div style={{ fontSize: "14px", fontWeight: 700, marginBottom: "12px" }}>Apply these changes:</div>
-                  {modifications.map((mod, i) => {
-                    const fieldDef = getFieldDef(mod.field);
-                    const typeDef = getChangeTypes(mod.field).find((ct) => ct.value === mod.type);
-                    return (
-                      <div key={i} style={{ padding: "6px 12px", backgroundColor: "#e3f1df", borderRadius: "6px", marginBottom: "4px", fontSize: "13px" }}>
-                        <strong>{fieldDef?.label || mod.field}</strong>: {typeDef?.label || mod.type} — <strong>{mod.value}</strong>
-                        {mod.rounding && mod.rounding !== "none" && <> (round to .{mod.rounding})</>}
-                        {mod.type === "find_replace" && <> → <strong>{mod.value2}</strong></>}
-                      </div>
-                    );
-                  })}
-                </div>
-
-                <div style={{ padding: "12px 16px", backgroundColor: "#f9fafb", borderRadius: "8px", border: "1px solid #e1e3e5", marginBottom: "16px" }}>
-                  <div style={{ fontSize: "13px", color: "#637381" }}>
-                    Currently <strong>{matchedProducts.length}</strong> product{matchedProducts.length !== 1 ? "s" : ""} match this rule. The rule will also apply to future products that match these conditions.
-                  </div>
-                </div>
-
-                <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
-                  <button style={styles.secondaryBtn} onClick={() => setStep(2)}>← Back</button>
-                  <button style={styles.secondaryBtn} onClick={() => { setShowCreator(false); setStep(1); setFilterRules([]); setModifications([]); setRuleName(""); setRuleNameTouched(false); }}>Cancel</button>
-                  <button style={styles.primaryBtn(!!ruleName.trim())} onClick={handleSaveRule} disabled={!ruleName.trim() || isSubmitting}>
-                    {isSubmitting ? "Saving..." : "💾 Save Automation Rule"}
-                  </button>
-                </div>
-              </s-box>
-            </s-section>
-          )}
-        </>
-      )}
-
-      {/* ════════════════════ EXISTING RULES LIST ════════════════════ */}
-      <s-section heading={`Rules (${rules.length})`}>
-        {rules.length === 0 ? (
-          <s-box padding="loose" borderWidth="base" borderRadius="base">
-            <div style={{ textAlign: "center", padding: "20px" }}>
-              <div style={{ fontSize: "32px", marginBottom: "8px" }}>📋</div>
-              <div style={{ fontSize: "14px", color: "#637381" }}>
-                No automation rules yet. Create one to automatically adjust prices when products are created or updated.
+          {/* Match preview */}
+          {filterRules.length > 0 && (
+            <div style={{ marginTop: "16px", padding: "10px 14px", backgroundColor: "#f9fafb", borderRadius: "8px", border: "1px solid #e1e3e5" }}>
+              <div style={{ fontSize: "13px", color: "#637381" }}>
+                <strong>{matchedProducts.length}</strong> existing product{matchedProducts.length !== 1 ? "s" : ""} currently match{matchedProducts.length === 1 ? "es" : ""} these conditions
               </div>
             </div>
-          </s-box>
-        ) : (
-          <s-section padding="none">
-            {rules.map((rule) => {
-              const { conditions, actions } = parseRuleDisplay(rule);
-              return (
-                <div key={rule.id} style={{ ...styles.card, display: "flex", alignItems: "flex-start", gap: "16px" }}>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px" }}>
-                      <div style={{ fontSize: "15px", fontWeight: 700 }}>{rule.name}</div>
-                      <span style={styles.badge(rule.enabled ? "success" : "info")}>
-                        {rule.enabled ? "Active" : "Paused"}
-                      </span>
-                    </div>
-                    <div style={{ fontSize: "13px", color: "#637381", marginBottom: "4px" }}>
-                      <strong>When:</strong>{" "}
-                      {conditions.map((c, i) => {
-                        const fieldDef = FILTER_FIELDS.find((f) => f.value === c.field);
-                        const opDef = getOperatorsForField(c.field).find((o) => o.value === c.operator);
-                        return (
-                          <span key={i}>
-                            {i > 0 && " AND "}
-                            {fieldDef?.label || c.field} {opDef?.label || c.operator} "{c.value}"
-                          </span>
-                        );
-                      })}
-                      {conditions.length === 0 && "All products"}
-                    </div>
-                    <div style={{ fontSize: "13px", color: "#637381", marginBottom: "4px" }}>
-                      <strong>Then:</strong>{" "}
-                      {actions.map((a, i) => {
-                        const fieldDef = getFieldDef(a.field);
-                        const typeDef = getChangeTypes(a.field).find((ct) => ct.value === a.type);
-                        return (
-                          <span key={i}>
-                            {i > 0 && ", "}
-                            {fieldDef?.label || a.field}: {typeDef?.label || a.type} {a.value}
-                            {a.rounding && a.rounding !== "none" && ` (round to .${a.rounding})`}
-                          </span>
-                        );
-                      })}
-                    </div>
-                    <div style={{ fontSize: "12px", color: "#919eab", marginTop: "4px" }}>
-                      Runs: {rule.runCount || 0} · Created: {new Date(rule.createdAt).toLocaleDateString()}
-                    </div>
+          )}
+        </s-box>
+      </s-section>
+
+      {/* ─── Modifications ─── */}
+      <s-section heading="Modifications">
+        <s-box padding="base">
+          <div style={{ fontSize: "13px", color: "#637381", marginBottom: "16px" }}>
+            Define what changes to apply when a matching product triggers this rule.
+          </div>
+
+          {modifications.map((mod) => {
+            const fieldDef = getFieldDef(mod.field);
+            const changeTypes = getChangeTypes(mod.field);
+            return (
+              <div key={mod.id} style={{ ...styles.card, position: "relative" }}>
+                <button style={{ position: "absolute", top: "8px", right: "8px", border: "none", background: "none", cursor: "pointer", fontSize: "18px", color: "#637381" }} onClick={() => removeMod(mod.id)}>✕</button>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "12px" }}>
+                  <div>
+                    <label style={{ fontSize: "12px", fontWeight: 600, color: "#637381", marginBottom: "4px", display: "block" }}>Field</label>
+                    <select style={styles.select} value={mod.field} onChange={(e) => updateMod(mod.id, "field", e.target.value)}>
+                      {EDITABLE_FIELDS.map((f) => (
+                        <option key={f.value} value={f.value}>{f.icon} {f.label}</option>
+                      ))}
+                    </select>
                   </div>
-                  <div style={{ display: "flex", gap: "6px", flexShrink: 0 }}>
-                    <button style={styles.secondaryBtn} onClick={() => fetcher.submit({ intent: "toggle_rule", ruleId: rule.id }, { method: "POST" })}>
-                      {rule.enabled ? "Pause" : "Enable"}
-                    </button>
-                    <button style={styles.dangerBtn(true)} onClick={() => fetcher.submit({ intent: "delete_rule", ruleId: rule.id }, { method: "POST" })}>
-                      Delete
-                    </button>
+                  <div>
+                    <label style={{ fontSize: "12px", fontWeight: 600, color: "#637381", marginBottom: "4px", display: "block" }}>Change Type</label>
+                    <select style={styles.select} value={mod.type} onChange={(e) => updateMod(mod.id, "type", e.target.value)}>
+                      {changeTypes.map((ct) => (
+                        <option key={ct.value} value={ct.value}>{ct.label}</option>
+                      ))}
+                    </select>
                   </div>
                 </div>
-              );
-            })}
-          </s-section>
-        )}
+                <div style={{ display: "grid", gridTemplateColumns: fieldDef?.category === "numeric" ? "1fr 1fr" : "1fr", gap: "12px" }}>
+                  <div>
+                    <label style={{ fontSize: "12px", fontWeight: 600, color: "#637381", marginBottom: "4px", display: "block" }}>Value</label>
+                    {fieldDef?.category === "select" ? (
+                      <select style={styles.select} value={mod.value} onChange={(e) => updateMod(mod.id, "value", e.target.value)}>
+                        <option value="">Select...</option>
+                        {fieldDef.options.map((opt) => (
+                          <option key={opt} value={opt}>{opt}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input style={styles.input} type={fieldDef?.category === "numeric" ? "number" : "text"} placeholder={fieldDef?.category === "numeric" ? "0.00" : "Value..."} value={mod.value} onChange={(e) => updateMod(mod.id, "value", e.target.value)} />
+                    )}
+                  </div>
+                  {fieldDef?.category === "numeric" && (
+                    <div>
+                      <label style={{ fontSize: "12px", fontWeight: 600, color: "#637381", marginBottom: "4px", display: "block" }}>Rounding</label>
+                      <select style={styles.select} value={mod.rounding} onChange={(e) => updateMod(mod.id, "rounding", e.target.value)}>
+                        <option value="none">No rounding</option>
+                        <option value="99">Round to .99</option>
+                        <option value="95">Round to .95</option>
+                        <option value="whole">Round to whole</option>
+                      </select>
+                    </div>
+                  )}
+                </div>
+                {mod.type === "find_replace" && (
+                  <div style={{ marginTop: "12px" }}>
+                    <label style={{ fontSize: "12px", fontWeight: 600, color: "#637381", marginBottom: "4px", display: "block" }}>Replace With</label>
+                    <input style={styles.input} type="text" placeholder="Replacement text..." value={mod.value2 || ""} onChange={(e) => updateMod(mod.id, "value2", e.target.value)} />
+                  </div>
+                )}
+              </div>
+            );
+          })}
+
+          <button style={{ ...styles.primaryBtn(true), backgroundColor: "#2c6ecb" }} onClick={addMod}>+ Add modification</button>
+        </s-box>
+      </s-section>
+
+      {/* ─── Save / Cancel ─── */}
+      <s-section>
+        <s-box padding="base">
+          <div style={{ display: "flex", gap: "12px", justifyContent: "flex-end" }}>
+            <button style={styles.secondaryBtn} onClick={() => { setView("landing"); resetForm(); }}>
+              Cancel
+            </button>
+            <button
+              style={styles.primaryBtn(!!ruleName.trim() && filterRules.length > 0 && modifications.length > 0)}
+              onClick={handleSaveRule}
+              disabled={isSubmitting || !ruleName.trim() || filterRules.length === 0 || modifications.length === 0}
+            >
+              {isSubmitting ? "Saving..." : "Save rule"}
+            </button>
+          </div>
+        </s-box>
       </s-section>
     </s-page>
   );
