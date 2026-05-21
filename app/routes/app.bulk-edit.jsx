@@ -1055,7 +1055,7 @@ export default function BulkEdit() {
   }, [location.key]);
 
   // Step 1 state
-  const [filterRules, setFilterRules] = useState([]);
+  const [filterRules, setFilterRules] = useState([{ id: 1, field: "title", operator: "contains", value: "", value2: "" }]);
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [isSearching, setIsSearching] = useState(false);
   const [serverFilteredProducts, setServerFilteredProducts] = useState(null);
