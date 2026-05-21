@@ -1954,27 +1954,16 @@ export default function BulkEdit() {
           <s-box padding="base">
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "8px" }}>
               <div style={{ minWidth: 0 }}>
-                <s-text variant="headingMd" fontWeight="bold">Configure Changes</s-text>
-                <s-text tone="subdued" variant="bodySm">
+                <div style={{ fontWeight: 700, fontSize: "16px", color: "#202223" }}>Apply Modifications</div>
+                <div style={{ fontSize: "13px", color: "#637381", marginTop: "4px" }}>
                   Editing {selectedIds.size} product{selectedIds.size !== 1 ? "s" : ""} ({totalVariants} variant{totalVariants !== 1 ? "s" : ""})
-                </s-text>
+                </div>
               </div>
               <button style={{ ...styles.secondaryBtn, whiteSpace: "nowrap", flexShrink: 0 }} onClick={() => setStep(1)}>← Change Selection</button>
             </div>
           </s-box>
 
-          {/* Quick Presets */}
-          <s-box padding="base">
-            <div style={{ fontWeight: 600, fontSize: "14px", color: "#202223", marginBottom: "10px" }}>Quick Presets (Price)</div>
-            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-              {QUICK_PRESETS.map((preset, idx) => (
-                <button key={idx} style={styles.presetBtn(activePreset === idx)} onClick={() => applyPreset(preset, idx)} title={preset.description || preset.label}>
-                  <span style={{ fontSize: "20px" }}>{preset.icon}</span>
-                  <span>{preset.label}</span>
-                </button>
-              ))}
-            </div>
-          </s-box>
+
 
           {/* Edit name */}
           <s-box padding="base">
@@ -1995,11 +1984,38 @@ export default function BulkEdit() {
             </div>
 
             {modifications.length === 0 ? (
-              <div style={{ textAlign: "center", padding: "40px 20px", border: "2px dashed #d2d5d8", borderRadius: "12px", backgroundColor: "#fafbfb" }}>
-                <div style={{ fontSize: "32px", marginBottom: "8px" }}>⚡</div>
-                <div style={{ fontSize: "15px", fontWeight: 600, marginBottom: "4px" }}>Choose a preset above or add a custom modification</div>
-                <div style={{ fontSize: "13px", color: "#637381", marginBottom: "16px" }}>You can edit any product field: price, title, vendor, tags, status, SKU, and more</div>
-                <button onClick={() => { addMod(); setActivePreset(null); }} style={styles.primaryBtn(true)}>Add Custom Modification</button>
+              <div style={{ display: "flex", gap: "20px", flexWrap: "wrap" }}>
+                <div style={{ flex: "1 1 300px", textAlign: "center", padding: "40px 20px", border: "2px dashed #d2d5d8", borderRadius: "12px", backgroundColor: "#fafbfb" }}>
+                  <div style={{ fontSize: "32px", marginBottom: "8px" }}>⚡</div>
+                  <div style={{ fontSize: "15px", fontWeight: 600, marginBottom: "4px" }}>Add a modification to get started</div>
+                  <div style={{ fontSize: "13px", color: "#637381", marginBottom: "16px" }}>Edit any product field: price, title, vendor, tags, status, metafields, and more</div>
+                  <button onClick={() => { addMod(); setActivePreset(null); }} style={styles.primaryBtn(true)}>Apply Modifications</button>
+                  <div style={{ marginTop: "16px", display: "flex", gap: "6px", flexWrap: "wrap", justifyContent: "center" }}>
+                    {QUICK_PRESETS.slice(0, 4).map((preset, idx) => (
+                      <button key={idx} style={{ ...styles.presetBtn(activePreset === idx), padding: "8px 12px", minWidth: "60px" }} onClick={() => applyPreset(preset, idx)} title={preset.description || preset.label}>
+                        <span style={{ fontSize: "16px" }}>{preset.icon}</span>
+                        <span style={{ fontSize: "11px" }}>{preset.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div style={{ flex: "0 0 260px", padding: "16px", borderRadius: "12px", backgroundColor: "#f8fafb", border: "1px solid #e8ecf0" }}>
+                  <div style={{ fontWeight: 700, fontSize: "13px", color: "#374151", marginBottom: "10px" }}>💡 Example Use Cases</div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                    {[
+                      "Update prices across products",
+                      "Change product templates by category",
+                      "Update weights filtered by title & variant",
+                      "Bulk add/remove tags for collections & FB Product Sets",
+                      "Edit Google Custom Tags for Merchant",
+                      "Flash sale: drop prices & adjust compare-at",
+                    ].map((ex, i) => (
+                      <div key={i} style={{ fontSize: "12px", color: "#4b5563", padding: "6px 8px", backgroundColor: "white", borderRadius: "6px", border: "1px solid #e8ecf0" }}>
+                        {ex}
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
             ) : (
               modifications.map((mod, idx) => {
