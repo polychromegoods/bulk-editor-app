@@ -1723,7 +1723,7 @@ export default function BulkEdit() {
 
       {/* Step indicator */}
       <s-box padding="base">
-        <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: "2px", flexWrap: "wrap", maxWidth: "100%" }}>
+        <div style={{ display: "flex", justifyContent: "flex-start", alignItems: "center", gap: "2px", flexWrap: "wrap", maxWidth: "100%" }}>
           {[
             { num: 1, label: "Select" },
             { num: 2, label: "Configure" },
@@ -1748,18 +1748,23 @@ export default function BulkEdit() {
       {/* ════════════════════ STEP 1: SELECT PRODUCTS ════════════════════ */}
       {step === 1 && (
         <s-section>
-          {/* Filter builder */}
+          {/* Filter builder - emphasized as primary first action */}
           <s-box padding="base">
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "10px", flexWrap: "wrap", gap: "8px" }}>
-              <div style={{ minWidth: 0 }}>
-                <div style={{ fontWeight: 600, fontSize: "15px", color: "#202223" }}>Filter Products</div>
-                <div style={{ fontSize: "12px", color: "#637381" }}>Add rules to narrow down which products to edit</div>
-              </div>
-              <div style={{ display: "flex", gap: "8px", flexShrink: 0 }}>
-                {filterRules.length > 0 && (
-                  <button onClick={clearAllFilters} style={{ ...styles.secondaryBtn, padding: "6px 12px", fontSize: "12px", color: "#d72c0d" }}>Clear All</button>
-                )}
-                <button onClick={addFilterRule} style={{ ...styles.primaryBtn(true), padding: "6px 16px", fontSize: "13px" }}>+ Add Filter</button>
+            <div style={{ padding: "16px", borderRadius: "12px", border: "2px solid #2c6ecb", backgroundColor: "#f0f7ff", marginBottom: "16px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px" }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
+                    <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: "24px", height: "24px", borderRadius: "50%", backgroundColor: "#2c6ecb", color: "white", fontSize: "12px", fontWeight: 700 }}>1</span>
+                    <span style={{ fontWeight: 700, fontSize: "16px", color: "#1a56db" }}>Filter Products First</span>
+                  </div>
+                  <div style={{ fontSize: "13px", color: "#4b5563", marginLeft: "32px" }}>Narrow down by vendor, type, tags, price, or status — then select from the filtered results below</div>
+                </div>
+                <div style={{ display: "flex", gap: "8px", flexShrink: 0 }}>
+                  {filterRules.length > 0 && (
+                    <button onClick={clearAllFilters} style={{ ...styles.secondaryBtn, padding: "8px 14px", fontSize: "13px", color: "#d72c0d" }}>Clear All</button>
+                  )}
+                  <button onClick={addFilterRule} style={{ ...styles.primaryBtn(true), padding: "10px 20px", fontSize: "14px", fontWeight: 700, boxShadow: "0 2px 6px rgba(44,110,203,0.25)" }}>+ Add Filter</button>
+                </div>
               </div>
             </div>
 
