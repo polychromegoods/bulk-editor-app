@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import { useLoaderData, useFetcher, useNavigate } from "react-router";
+import { useLoaderData, useFetcher, useNavigate, useRouteError, isRouteErrorResponse } from "react-router";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
@@ -15,60 +15,86 @@ export const loader = async ({ request }) => {
   }
   const plan = shopPlan.plan || "free";
 
-  // Fetch products for filter preview
-  const response = await admin.graphql(
-    `#graphql
-    query ($first: Int!) {
-      products(first: $first) {
-        edges {
-          node {
-            id
-            title
-            handle
-            status
-            productType
-            vendor
-            tags
-            featuredMedia {
-              preview {
-                image {
-                  url
-                  altText
+  // Fetch products for filter preview (wrapped in try/catch to prevent 500 crashes)
+  let products = [];
+  try {
+    const response = await admin.graphql(
+      `#graphql
+      query ($first: Int!) {
+        products(first: $first) {
+          edges {
+            node {
+              id
+              title
+              handle
+              status
+              productType
+              vendor
+              tags
+              featuredMedia {
+                preview {
+                  image {
+                    url
+                    altText
+                  }
                 }
               }
-            }
-            variants(first: 100) {
-              edges {
-                node {
-                  id
-                  title
-                  price
-                  compareAtPrice
-                  sku
-                  barcode
-                  inventoryQuantity
+              variants(first: 100) {
+                edges {
+                  node {
+                    id
+                    title
+                    price
+                    compareAtPrice
+                    sku
+                    barcode
+                    inventoryQuantity
+                  }
                 }
               }
             }
           }
         }
-      }
-    }`,
-    { variables: { first: 250 } }
-  );
-  const data = await response.json();
-  const products = (data.data?.products?.edges || []).map((e) => e.node);
+      }`,
+      { variables: { first: 250 } }
+    );
+    const data = await response.json();
+    products = (data.data?.products?.edges || []).map((e) => e.node);
+  } catch (err) {
+    console.error("[Automations] Failed to fetch products:", err.message);
+    // Continue with empty products — the page can still load and show rules
+  }
 
-  const rules = await prisma.automationRule.findMany({
-    where: { shop },
-    orderBy: { createdAt: "desc" },
-  });
+  let rules = [];
+  try {
+    rules = await prisma.automationRule.findMany({
+      where: { shop },
+      orderBy: { createdAt: "desc" },
+    });
+  } catch (err) {
+    console.error("[Automations] Failed to fetch rules:", err.message);
+  }
 
   return { products, rules, currentPlan: plan };
 };
 
+// Prevent loader revalidation on fetcher POST submissions to avoid crashes
+// during concurrent webhook processing or stale sessions
+export function shouldRevalidate({ formMethod, defaultShouldRevalidate }) {
+  if (formMethod && formMethod !== "GET") {
+    return false;
+  }
+  return defaultShouldRevalidate;
+}
+
 export const action = async ({ request }) => {
-  const { session } = await authenticate.admin(request);
+  let session;
+  try {
+    ({ session } = await authenticate.admin(request));
+  } catch (authErr) {
+    console.error("[Automations] Authentication failed:", authErr.message);
+    return { error: "Authentication failed. Please reload the page and try again." };
+  }
   const shop = session.shop;
 
   const shopPlan = await prisma.shopPlan.findUnique({ where: { shop } });
@@ -92,7 +118,7 @@ export const action = async ({ request }) => {
     const name = formData.get("name");
     const filterRules = formData.get("filterRules") || "[]";
     const modifications = formData.get("modifications") || "[]";
-    const trigger = formData.get("trigger") || "updated_or_created";
+    const trigger = formData.get("trigger") || "product_updated_or_created";
 
     const rule = await prisma.automationRule.create({
       data: {
@@ -273,8 +299,8 @@ function matchValue(value, rule) {
    TRIGGER OPTIONS
    ═══════════════════════════════════════════════════════════════ */
 const TRIGGER_OPTIONS = [
-  { value: "updated_or_created", label: "When a product is updated or created" },
-  { value: "created", label: "When a product is created" },
+  { value: "product_updated_or_created", label: "When a product is updated or created" },
+  { value: "product_created", label: "When a product is created" },
 ];
 
 function getTriggerLabel(triggerValue) {
@@ -327,7 +353,7 @@ export default function Automations() {
   // Rule form state (single-page form)
   const [ruleName, setRuleName] = useState("");
   const [ruleEnabled, setRuleEnabled] = useState(true);
-  const [trigger, setTrigger] = useState("updated_or_created");
+  const [trigger, setTrigger] = useState("product_updated_or_created");
   const [filterRules, setFilterRules] = useState([]);
   const [modifications, setModifications] = useState([]);
 
@@ -349,7 +375,7 @@ export default function Automations() {
   const resetForm = () => {
     setRuleName("");
     setRuleEnabled(true);
-    setTrigger("updated_or_created");
+    setTrigger("product_updated_or_created");
     setFilterRules([]);
     setModifications([]);
   };
@@ -531,7 +557,7 @@ export default function Automations() {
                       </div>
                       {/* Trigger info */}
                       <div style={{ fontSize: "12px", color: "#2c6ecb", fontWeight: 500, marginBottom: "6px", display: "flex", alignItems: "center", gap: "4px" }}>
-                        <span>⚡</span> {getTriggerLabel(rule.trigger || "updated_or_created")}
+                        <span>⚡</span> {getTriggerLabel(rule.trigger || "product_updated_or_created")}
                       </div>
                       <div style={{ fontSize: "13px", color: "#637381", marginBottom: "4px" }}>
                         <strong>When:</strong>{" "}
@@ -634,7 +660,7 @@ export default function Automations() {
               ))}
             </select>
             <div style={{ fontSize: "12px", color: "#637381", marginTop: "6px" }}>
-              {trigger === "created"
+              {trigger === "product_created"
                 ? "This rule will only run when a new product is created in your store."
                 : "This rule will run when a product is created or when an existing product is updated."
               }
@@ -793,3 +819,38 @@ export default function Automations() {
 export const headers = (headersArgs) => {
   return boundary.headers(headersArgs);
 };
+
+export function ErrorBoundary() {
+  const error = useRouteError();
+  const navigate = useNavigate();
+  const isResponse = isRouteErrorResponse(error);
+  const title = isResponse
+    ? `${error.status} — ${error.statusText || "Something went wrong"}`
+    : "Something Went Wrong";
+  const message = isResponse
+    ? "The server returned an unexpected response. This may be caused by a temporary network issue."
+    : (error?.message || "An unexpected error occurred. Please try reloading the page.");
+  return (
+    <div style={{ textAlign: "center", padding: "60px 20px" }}>
+      <div style={{ fontSize: "48px", marginBottom: "12px" }}>⚠️</div>
+      <div style={{ fontSize: "20px", fontWeight: 700, color: "#202223", marginBottom: "8px" }}>{title}</div>
+      <div style={{ fontSize: "14px", color: "#637381", maxWidth: "480px", margin: "0 auto 24px", lineHeight: "1.6" }}>
+        {message}
+      </div>
+      <div style={{ display: "flex", gap: "12px", justifyContent: "center" }}>
+        <button
+          onClick={() => window.location.reload()}
+          style={{ padding: "10px 24px", borderRadius: "8px", border: "none", backgroundColor: "#2c6ecb", color: "white", fontSize: "14px", fontWeight: 600, cursor: "pointer" }}
+        >
+          Reload Page
+        </button>
+        <button
+          onClick={() => navigate("/app")}
+          style={{ padding: "10px 24px", borderRadius: "8px", border: "1px solid #c4cdd5", backgroundColor: "white", fontSize: "14px", cursor: "pointer" }}
+        >
+          Go to Dashboard
+        </button>
+      </div>
+    </div>
+  );
+}

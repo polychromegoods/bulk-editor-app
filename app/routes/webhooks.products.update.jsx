@@ -13,7 +13,8 @@ export const action = async ({ request }) => {
     }
     const allRules = await prisma.automationRule.findMany({ where: { shop, enabled: true } });
     // Only run rules that trigger on product update (or updated_or_created)
-    const rules = allRules.filter(r => !r.trigger || r.trigger === "product_updated_or_created");
+    // Accept both old values ("updated_or_created") and new values ("product_updated_or_created") for backwards compatibility
+    const rules = allRules.filter(r => !r.trigger || r.trigger === "product_updated_or_created" || r.trigger === "updated_or_created");
     if (rules.length === 0) {
       return new Response("OK", { status: 200 });
     }
