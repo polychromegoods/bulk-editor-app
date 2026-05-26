@@ -266,7 +266,7 @@ export const action = async ({ request }) => {
       try {
         // Separate product-level, variant-level, and metafield changes
         const metafieldChanges = productChanges.filter(c => c.field.startsWith("metafield::"));
-        const productLevelChanges = productChanges.filter(c => ["title", "vendor", "productType", "status", "tags", "templateSuffix"].includes(c.field));
+        const productLevelChanges = productChanges.filter(c => ["title", "handle", "vendor", "productType", "status", "tags", "templateSuffix"].includes(c.field));
         const variantLevelChanges = productChanges.filter(c => ["price", "compareAtPrice", "sku", "barcode", "weight", "taxable"].includes(c.field));
 
         // Apply metafield changes via metafieldsSet
@@ -336,6 +336,7 @@ export const action = async ({ request }) => {
           const productInput = {};
           for (const change of productLevelChanges) {
             if (change.field === "title") productInput.title = change.newValue;
+            else if (change.field === "handle") productInput.handle = change.newValue;
             else if (change.field === "vendor") productInput.vendor = change.newValue;
             else if (change.field === "productType") productInput.productType = change.newValue;
             else if (change.field === "status") productInput.status = change.newValue;
@@ -387,6 +388,31 @@ export const action = async ({ request }) => {
                 changeType: change.field,
                 changeSource: "bulk_edit",
               });
+            }
+
+            // Create URL redirects for handle changes if requested
+            const handleChanges = productLevelChanges.filter(c => c.field === "handle" && c.createRedirect !== false && c.oldValue && c.newValue && c.oldValue !== c.newValue);
+            for (const hc of handleChanges) {
+              try {
+                const redirectMutation = `#graphql
+                  mutation urlRedirectCreate($urlRedirect: UrlRedirectInput!) {
+                    urlRedirectCreate(urlRedirect: $urlRedirect) {
+                      urlRedirect { id path target }
+                      userErrors { field message }
+                    }
+                  }`;
+                await admin.graphql(redirectMutation, {
+                  variables: {
+                    urlRedirect: {
+                      path: "/products/" + hc.oldValue,
+                      target: "/products/" + hc.newValue,
+                    },
+                  },
+                });
+              } catch (redirectErr) {
+                // Non-fatal: redirect creation failure shouldn't block the edit
+                console.error("URL redirect creation failed:", redirectErr.message);
+              }
             }
           }
         }
@@ -618,8 +644,8 @@ export const action = async ({ request }) => {
     for (const [productId, productChanges] of Object.entries(changesByProduct)) {
       try {
         const metafieldChanges = productChanges.filter(c => c.field.startsWith("metafield::"));
-        const productLevelChanges = productChanges.filter(c => ["title", "vendor", "productType", "status", "tags"].includes(c.field));
-        const variantLevelChanges = productChanges.filter(c => !c.field.startsWith("metafield::") && !["title", "vendor", "productType", "status", "tags"].includes(c.field));
+        const productLevelChanges = productChanges.filter(c => ["title", "handle", "vendor", "productType", "status", "tags", "templateSuffix"].includes(c.field));
+        const variantLevelChanges = productChanges.filter(c => !c.field.startsWith("metafield::") && !["title", "handle", "vendor", "productType", "status", "tags", "templateSuffix"].includes(c.field));
 
         // Revert metafield changes
         if (metafieldChanges.length > 0) {
@@ -644,10 +670,12 @@ export const action = async ({ request }) => {
           const productInput = {};
           for (const change of productLevelChanges) {
             if (change.field === "title") productInput.title = change.oldValue;
+            else if (change.field === "handle") productInput.handle = change.oldValue;
             else if (change.field === "vendor") productInput.vendor = change.oldValue;
             else if (change.field === "productType") productInput.productType = change.oldValue;
             else if (change.field === "status") productInput.status = change.oldValue;
             else if (change.field === "tags") productInput.tags = change.oldValue.split(",").map(t => t.trim()).filter(Boolean);
+            else if (change.field === "templateSuffix") productInput.templateSuffix = change.oldValue;
           }
           await admin.graphql(`#graphql
             mutation productUpdate($input: ProductInput!) {
@@ -697,6 +725,7 @@ const BASE_EDITABLE_FIELDS = [
   { value: "weight", label: "Weight", icon: "⚖️", category: "numeric", level: "variant", accessor: (v) => { const w = v.inventoryItem?.measurement?.weight?.value; return w != null ? String(w) : "0"; } },
   // Text (product-level)
   { value: "title", label: "Title", icon: "📝", category: "text", level: "product", accessor: null },
+  { value: "handle", label: "Handle (URL)", icon: "🔗", category: "text", level: "product", accessor: null },
   { value: "vendor", label: "Vendor", icon: "🏢", category: "text", level: "product", accessor: null },
   { value: "productType", label: "Product Type", icon: "📂", category: "text", level: "product", accessor: null },
   // Tags (product-level)
@@ -801,10 +830,12 @@ const NUMERIC_CHANGE_TYPES = [
 ];
 
 const TEXT_CHANGE_TYPES = [
-  { value: "set", label: "Set to value" },
-  { value: "prepend", label: "Prepend text" },
-  { value: "append", label: "Append text" },
-  { value: "find_replace", label: "Find & Replace" },
+  { value: "set", label: "Set text to value" },
+  { value: "append", label: "Add text to end" },
+  { value: "remove_from_end", label: "Remove text from end" },
+  { value: "prepend", label: "Add text to beginning" },
+  { value: "remove_from_beginning", label: "Remove text from beginning" },
+  { value: "find_replace", label: "Search/Replace" },
 ];
 
 const TAG_CHANGE_TYPES = [
@@ -839,6 +870,7 @@ function getFieldDef(fieldValue, allFields) {
 
 const FILTER_FIELDS = [
   { value: "title", label: "Title", type: "text" },
+  { value: "handle", label: "Handle (URL)", type: "text" },
   { value: "vendor", label: "Vendor", type: "text" },
   { value: "productType", label: "Product Type", type: "text" },
   { value: "status", label: "Status", type: "select", options: ["ACTIVE", "DRAFT", "ARCHIVED"] },
@@ -1336,7 +1368,7 @@ export default function BulkEdit() {
   const addMod = () =>
     setModifications((prev) => [
       ...prev,
-      { id: Date.now(), field: "price", type: "exact", value: "", value2: "", rounding: "none" },
+      { id: Date.now(), field: "price", type: "exact", value: "", value2: "", rounding: "none", caseInsensitive: true, createRedirect: false },
     ]);
 
   const updateMod = (id, key, val) =>
@@ -1351,6 +1383,8 @@ export default function BulkEdit() {
           updated.value = "";
           updated.value2 = "";
           updated.rounding = "none";
+          updated.caseInsensitive = true;
+          updated.createRedirect = val === "handle";
         }
         return updated;
       })
@@ -1407,7 +1441,32 @@ export default function BulkEdit() {
           const sep = (cur.endsWith(" ") || mod.value.startsWith(" ")) ? "" : " ";
           return cur + sep + mod.value;
         }
-        case "find_replace": return cur.split(mod.value).join(mod.value2 || "");
+        case "find_replace": {
+          const caseInsensitive = mod.caseInsensitive !== false;
+          if (caseInsensitive) {
+            const escaped = mod.value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            return cur.replace(new RegExp(escaped, 'gi'), mod.value2 || "");
+          }
+          return cur.split(mod.value).join(mod.value2 || "");
+        }
+        case "remove_from_end": {
+          const caseIns = mod.caseInsensitive !== false;
+          const sv = mod.value;
+          if (!sv) return cur;
+          if (caseIns ? cur.toLowerCase().endsWith(sv.toLowerCase()) : cur.endsWith(sv)) {
+            return cur.slice(0, cur.length - sv.length);
+          }
+          return cur;
+        }
+        case "remove_from_beginning": {
+          const caseIns = mod.caseInsensitive !== false;
+          const sv = mod.value;
+          if (!sv) return cur;
+          if (caseIns ? cur.toLowerCase().startsWith(sv.toLowerCase()) : cur.startsWith(sv)) {
+            return cur.slice(sv.length);
+          }
+          return cur;
+        }
         default: return cur;
       }
     }
@@ -1580,7 +1639,7 @@ export default function BulkEdit() {
           }
           const nv = calcValue(cur, mod);
           if (nv === null || nv === cur) continue;
-          changesToSubmit.push({ productId: product.id, productTitle: product.title, variantId: null, variantTitle: null, field: mod.field, oldValue: cur, newValue: nv, modificationType: mod.type });
+          changesToSubmit.push({ productId: product.id, productTitle: product.title, variantId: null, variantTitle: null, field: mod.field, oldValue: cur, newValue: nv, modificationType: mod.type, ...(mod.field === "handle" ? { createRedirect: mod.createRedirect !== false } : {}) });
         } else {
           for (const edge of product.variants?.edges || []) {
             const variant = edge.node;
@@ -2047,6 +2106,8 @@ export default function BulkEdit() {
                 const isNumeric = fieldDef?.category === "numeric";
                 const isSelect = fieldDef?.category === "select";
                 const isFindReplace = mod.type === "find_replace";
+                const isTextSearch = ["find_replace", "remove_from_end", "remove_from_beginning"].includes(mod.type);
+                const isHandle = mod.field === "handle";
 
                 return (
                   <div key={mod.id} style={{ ...styles.card, borderLeft: "3px solid #2c6ecb" }}>
@@ -2075,6 +2136,7 @@ export default function BulkEdit() {
                           </optgroup>
                           <optgroup label="Product Fields">
                             <option value="title">Title</option>
+                            <option value="handle">Handle (URL)</option>
                             <option value="vendor">Vendor</option>
                             <option value="productType">Product Type</option>
                             <option value="tags">Tags</option>
@@ -2156,6 +2218,29 @@ export default function BulkEdit() {
                         </div>
                       )}
                     </div>
+
+                    {/* Case-insensitive checkbox for text search operations */}
+                    {isTextSearch && (
+                      <div style={{ marginTop: "10px" }}>
+                        <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer", fontSize: "13px" }}>
+                          <input type="checkbox" checked={mod.caseInsensitive !== false} onChange={(e) => updateMod(mod.id, "caseInsensitive", e.target.checked)} style={{ width: "16px", height: "16px", accentColor: "#2c6ecb" }} />
+                          Case-insensitive search
+                        </label>
+                      </div>
+                    )}
+
+                    {/* Handle-specific options */}
+                    {isHandle && (
+                      <div style={{ marginTop: "10px", padding: "10px", backgroundColor: "#f6f6f7", borderRadius: "6px", border: "1px solid #e1e3e5" }}>
+                        <label style={{ display: "flex", alignItems: "center", gap: "8px", cursor: "pointer", fontSize: "13px", marginBottom: "8px" }}>
+                          <input type="checkbox" checked={mod.createRedirect !== false} onChange={(e) => updateMod(mod.id, "createRedirect", e.target.checked)} style={{ width: "16px", height: "16px", accentColor: "#2c6ecb" }} />
+                          Create web redirects to the new handles
+                        </label>
+                        <div style={{ fontSize: "11px", color: "#637381", marginLeft: "24px" }}>
+                          Old URLs will automatically redirect to the new handle. Requires <code>read_content</code> + <code>write_content</code> scopes.
+                        </div>
+                      </div>
+                    )}
                   </div>
                 );
               })

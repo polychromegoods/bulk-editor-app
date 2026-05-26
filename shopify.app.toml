@@ -6,7 +6,7 @@ embedded = true
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
-scopes = "read_products,write_products,read_inventory,write_inventory"
+scopes = "read_products,write_products,read_inventory,write_inventory,read_content,write_content"
 
 [auth]
 redirect_urls = ["https://bulk-editor-app-production.up.railway.app/auth/callback", "https://bulk-editor-app-production.up.railway.app/auth/shopify/callback", "https://bulk-editor-app-production.up.railway.app/api/auth/callback"]
