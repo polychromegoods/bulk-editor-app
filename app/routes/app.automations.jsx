@@ -84,12 +84,9 @@ export const loader = async ({ request }) => {
   return { products, rules, currentPlan: plan };
 };
 
-// Prevent loader revalidation on fetcher POST submissions to avoid crashes
-// during concurrent webhook processing or stale sessions
-export function shouldRevalidate({ formMethod, defaultShouldRevalidate }) {
-  if (formMethod && formMethod !== "GET") {
-    return false;
-  }
+// Allow revalidation after mutations so the rules list refreshes.
+// The loader has proper try/catch error handling to prevent crashes.
+export function shouldRevalidate({ defaultShouldRevalidate }) {
   return defaultShouldRevalidate;
 }
 

@@ -122,7 +122,7 @@ export const action = async ({ request }) => {
     for (const [productId, recs] of Object.entries(byProduct)) {
       try {
         // Separate product-level and variant-level changes
-        const productLevelFields = ["title", "vendor", "productType", "status", "tags", "templateSuffix"];
+        const productLevelFields = ["title", "vendor", "productType", "status", "tags", "templateSuffix", "handle"];
         const variantLevelFields = ["price", "compareAtPrice", "sku", "barcode", "weight", "taxable", "cost"];
         const productLevelRecs = recs.filter(r => productLevelFields.includes(r.changeType));
         const variantLevelRecs = recs.filter(r => variantLevelFields.includes(r.changeType) || !productLevelFields.includes(r.changeType));
@@ -137,6 +137,7 @@ export const action = async ({ request }) => {
             else if (rec.changeType === "status") productInput.status = rec.oldPrice;
             else if (rec.changeType === "tags") productInput.tags = (rec.oldPrice || "").split(",").map(t => t.trim()).filter(Boolean);
             else if (rec.changeType === "templateSuffix") productInput.templateSuffix = rec.oldPrice;
+            else if (rec.changeType === "handle") productInput.handle = rec.oldPrice;
           }
 
           const productMutation = `#graphql
