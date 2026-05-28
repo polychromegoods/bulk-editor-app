@@ -66,15 +66,21 @@ export const loader = async ({ request }) => {
   }
 
   let rules = [];
-  try {
-    rules = await prisma.automationRule.findMany({
+    try {
+    const rawRules = await prisma.automationRule.findMany({
       where: { shop },
       orderBy: { createdAt: "desc" },
     });
+    // Serialize dates to ISO strings to prevent React Router serialization errors
+    rules = rawRules.map(r => ({
+      ...r,
+      createdAt: r.createdAt?.toISOString(),
+      updatedAt: r.updatedAt?.toISOString(),
+      lastRun: r.lastRun?.toISOString() || null,
+    }));
   } catch (err) {
     console.error("[Automations] Failed to fetch rules:", err.message);
   }
-
   return { products, rules, currentPlan: plan };
 };
 
@@ -120,17 +126,23 @@ export const action = async ({ request }) => {
     const modifications = formData.get("modifications") || "[]";
     const trigger = formData.get("trigger") || "product_updated_or_created";
 
-    const rule = await prisma.automationRule.create({
-      data: {
-        shop,
-        name: name || "Untitled Rule",
-        enabled: true,
-        conditions: filterRules,
-        actions: modifications,
-        trigger,
-      },
-    });
-    return { success: true, rule };
+    try {
+      const rule = await prisma.automationRule.create({
+        data: {
+          shop,
+          name: name || "Untitled Rule",
+          enabled: true,
+          conditions: filterRules,
+          actions: modifications,
+          trigger,
+        },
+      });
+      // Serialize dates to ISO strings to prevent React Router serialization errors
+      return { success: true, rule: { ...rule, createdAt: rule.createdAt?.toISOString(), updatedAt: rule.updatedAt?.toISOString(), lastRun: rule.lastRun?.toISOString() || null } };
+    } catch (dbErr) {
+      console.error("[Automations] Failed to create rule:", dbErr.message);
+      return { error: "Failed to save automation rule. Please try again." };
+    }
   }
 
   if (intent === "toggle_rule") {
