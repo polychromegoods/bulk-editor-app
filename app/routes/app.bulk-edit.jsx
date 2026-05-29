@@ -1790,6 +1790,8 @@ export default function BulkEdit() {
           /* Modification grids: single column on mobile */
           .mod-grid-2col { grid-template-columns: 1fr !important; }
         }
+        /* Prevent Shopify mobile nav bar from covering bottom buttons */
+        s-page { padding-bottom: 80px !important; }
       ` }} />
       {/* Billing banner */}
       {currentPlan === "free" && (
