@@ -1791,7 +1791,7 @@ export default function BulkEdit() {
           .mod-grid-2col { grid-template-columns: 1fr !important; }
         }
         /* Prevent Shopify mobile nav bar from covering bottom buttons */
-        s-page { padding-bottom: 80px !important; }
+        s-page { padding-bottom: 120px !important; }
       ` }} />
       {/* Billing banner */}
       {currentPlan === "free" && (
@@ -2022,7 +2022,7 @@ export default function BulkEdit() {
             )}
           </div>
 
-          <div style={{ position: "sticky", bottom: 0, zIndex: 100, backgroundColor: "#fff", borderTop: "1px solid #e1e3e5", padding: "12px 16px", marginTop: "12px", boxShadow: "0 -2px 8px rgba(0,0,0,0.06)" }}>
+          <div style={{ backgroundColor: "#fff", borderTop: "1px solid #e1e3e5", padding: "12px 16px", marginTop: "12px", marginBottom: "100px" }}>
             {productsPerEdit !== Infinity && selectedIds.size > productsPerEdit && (
               <div style={{ padding: "10px 14px", backgroundColor: "#fff4e5", border: "1px solid #f5d680", borderRadius: "8px", marginBottom: "10px", fontSize: "13px", color: "#916a00" }}>
                 ⚠️ Free plan allows up to <strong>{productsPerEdit}</strong> products per edit. You have <strong>{selectedIds.size}</strong> selected. Please deselect some products or <span onClick={() => navigate("/app/billing")} style={{ color: "#2c6ecb", fontWeight: 600, cursor: "pointer", textDecoration: "underline" }}>upgrade your plan</span> for unlimited edits.
@@ -2292,7 +2292,7 @@ export default function BulkEdit() {
             </div>
           </s-box>
 
-          <s-box padding="base">
+          <div style={{ padding: "12px 16px", marginBottom: "100px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" }}>
               <button style={styles.secondaryBtn} onClick={() => setStep(1)}>← Back</button>
               <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
@@ -2304,7 +2304,7 @@ export default function BulkEdit() {
                 </button>
               </div>
             </div>
-          </s-box>
+          </div>
         </s-section>
       )}
 
@@ -2496,7 +2496,7 @@ export default function BulkEdit() {
           )}
 
           {/* Navigation */}
-          <s-box padding="base">
+          <div style={{ padding: "12px 16px", marginBottom: "100px" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" }}>
               <button style={{ ...styles.secondaryBtn, whiteSpace: "nowrap" }} onClick={() => setStep(2)} disabled={!!executionProgress}>← Back to Configure</button>
               <button
@@ -2507,7 +2507,7 @@ export default function BulkEdit() {
                 {executionProgress ? `Applying... ${executionProgress.completed}/${executionProgress.total}` : `Apply ${changes.length} Change${changes.length !== 1 ? "s" : ""}`}
               </button>
             </div>
-          </s-box>
+          </div>
 
           {/* Confirm dialog */}
           {showConfirmDialog && (
