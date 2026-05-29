@@ -1368,7 +1368,7 @@ export default function BulkEdit() {
   const addMod = () =>
     setModifications((prev) => [
       ...prev,
-      { id: Date.now(), field: "price", type: "exact", value: "", value2: "", rounding: "none", caseInsensitive: true, createRedirect: false },
+      { id: Date.now(), field: "price", type: "exact", value: "", value2: "", rounding: "none", caseInsensitive: true, createRedirect: false, compareAtOption: "none", compareAtValue: "" },
     ]);
 
   const updateMod = (id, key, val) =>
@@ -1385,6 +1385,8 @@ export default function BulkEdit() {
           updated.rounding = "none";
           updated.caseInsensitive = true;
           updated.createRedirect = val === "handle";
+          updated.compareAtOption = "none";
+          updated.compareAtValue = "";
         }
         return updated;
       })
@@ -1562,6 +1564,19 @@ export default function BulkEdit() {
               newValue: nv,
               modificationType: mod.type,
             });
+            // Also show compare-at price change in preview
+            if (mod.field === "price" && mod.compareAtOption && mod.compareAtOption !== "none") {
+              const curCompare = variant.compareAtPrice || "0";
+              let newCompare;
+              if (mod.compareAtOption === "current") {
+                newCompare = cur || "0";
+              } else if (mod.compareAtOption === "fixed") {
+                newCompare = mod.compareAtValue || "0";
+              }
+              if (newCompare && parseFloat(curCompare) !== parseFloat(newCompare)) {
+                result.push({ productId: product.id, productTitle: product.title, variantId: variant.id, variantTitle: variant.title, field: "compareAtPrice", oldValue: curCompare, newValue: newCompare, modificationType: "exact" });
+              }
+            }
           }
         }
       }
@@ -1607,6 +1622,16 @@ export default function BulkEdit() {
               oldValue: cur || (fieldDef.category === "numeric" ? "0" : "(empty)"),
               newValue: nv,
             });
+            // Also show compare-at price change in live preview
+            if (mod.field === "price" && mod.compareAtOption && mod.compareAtOption !== "none" && examples.length < 10) {
+              const curCompare = variant.compareAtPrice || "0";
+              let newCompare;
+              if (mod.compareAtOption === "current") newCompare = cur || "0";
+              else if (mod.compareAtOption === "fixed") newCompare = mod.compareAtValue || "0";
+              if (newCompare && parseFloat(curCompare) !== parseFloat(newCompare)) {
+                examples.push({ title: product.title, variant: variant.title !== "Default Title" ? variant.title : null, field: "compareAtPrice", oldValue: curCompare || "0", newValue: newCompare });
+              }
+            }
             if (examples.length >= 10) break;
           }
         }
@@ -1648,6 +1673,19 @@ export default function BulkEdit() {
             if (nv === null) continue;
             if (fieldDef.category === "numeric" ? parseFloat(cur || "0") === parseFloat(nv) : (cur || "") === nv) continue;
             changesToSubmit.push({ productId: product.id, productTitle: product.title, variantId: variant.id, variantTitle: variant.title, field: mod.field, oldValue: cur || (fieldDef.category === "numeric" ? "0" : ""), newValue: nv, modificationType: mod.type });
+            // Also add compare-at price change if option is set on a price modification
+            if (mod.field === "price" && mod.compareAtOption && mod.compareAtOption !== "none") {
+              const curCompare = variant.compareAtPrice || "0";
+              let newCompare;
+              if (mod.compareAtOption === "current") {
+                newCompare = cur || "0"; // Set compare-at to the CURRENT price (before change)
+              } else if (mod.compareAtOption === "fixed") {
+                newCompare = mod.compareAtValue || "0";
+              }
+              if (newCompare && parseFloat(curCompare) !== parseFloat(newCompare)) {
+                changesToSubmit.push({ productId: product.id, productTitle: product.title, variantId: variant.id, variantTitle: variant.title, field: "compareAtPrice", oldValue: curCompare, newValue: newCompare, modificationType: "exact" });
+              }
+            }
           }
         }
       }
@@ -2220,6 +2258,40 @@ export default function BulkEdit() {
                         </div>
                       )}
                     </div>
+
+                    {/* Compare-at price option when editing Price */}
+                    {mod.field === "price" && (
+                      <div style={{ marginTop: "12px" }}>
+                        <div
+                          onClick={() => updateMod(mod.id, "_compareAtExpanded", !mod._compareAtExpanded)}
+                          style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", padding: "8px 0", borderTop: "1px solid #e1e3e5" }}
+                        >
+                          <span style={{ fontSize: "13px", fontWeight: 600, color: "#2c6ecb" }}>Modifications to Compare-at price</span>
+                          <span style={{ fontSize: "16px", color: "#2c6ecb", transform: mod._compareAtExpanded ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s" }}>▼</span>
+                        </div>
+                        {mod._compareAtExpanded && (
+                          <div style={{ padding: "10px 0", display: "flex", flexWrap: "wrap", gap: "12px", alignItems: "flex-start" }}>
+                            <label style={{ display: "flex", alignItems: "center", gap: "6px", cursor: "pointer", fontSize: "13px" }}>
+                              <input type="radio" name={`compareAt-${mod.id}`} value="none" checked={mod.compareAtOption === "none"} onChange={() => updateMod(mod.id, "compareAtOption", "none")} style={{ accentColor: "#2c6ecb" }} />
+                              Don't modify the Compare-at Price
+                            </label>
+                            <label style={{ display: "flex", alignItems: "center", gap: "6px", cursor: "pointer", fontSize: "13px" }}>
+                              <input type="radio" name={`compareAt-${mod.id}`} value="current" checked={mod.compareAtOption === "current"} onChange={() => updateMod(mod.id, "compareAtOption", "current")} style={{ accentColor: "#2c6ecb" }} />
+                              Set the compare-at price to the current price
+                            </label>
+                            <label style={{ display: "flex", alignItems: "flex-start", gap: "6px", cursor: "pointer", fontSize: "13px" }}>
+                              <input type="radio" name={`compareAt-${mod.id}`} value="fixed" checked={mod.compareAtOption === "fixed"} onChange={() => updateMod(mod.id, "compareAtOption", "fixed")} style={{ accentColor: "#2c6ecb", marginTop: "2px" }} />
+                              <div>
+                                Set the compare-at price to a fixed value
+                                {mod.compareAtOption === "fixed" && (
+                                  <input type="number" value={mod.compareAtValue} onChange={(e) => updateMod(mod.id, "compareAtValue", e.target.value)} placeholder="100" style={{ ...styles.input, marginTop: "6px", width: "120px", display: "block" }} />
+                                )}
+                              </div>
+                            </label>
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     {/* Case-insensitive checkbox for text search operations */}
                     {isTextSearch && (
