@@ -2022,7 +2022,7 @@ export default function BulkEdit() {
             )}
           </div>
 
-          <s-box padding="base">
+          <div style={{ position: "sticky", bottom: 0, zIndex: 100, backgroundColor: "#fff", borderTop: "1px solid #e1e3e5", padding: "12px 16px", marginTop: "12px", boxShadow: "0 -2px 8px rgba(0,0,0,0.06)" }}>
             {productsPerEdit !== Infinity && selectedIds.size > productsPerEdit && (
               <div style={{ padding: "10px 14px", backgroundColor: "#fff4e5", border: "1px solid #f5d680", borderRadius: "8px", marginBottom: "10px", fontSize: "13px", color: "#916a00" }}>
                 ⚠️ Free plan allows up to <strong>{productsPerEdit}</strong> products per edit. You have <strong>{selectedIds.size}</strong> selected. Please deselect some products or <span onClick={() => navigate("/app/billing")} style={{ color: "#2c6ecb", fontWeight: 600, cursor: "pointer", textDecoration: "underline" }}>upgrade your plan</span> for unlimited edits.
@@ -2036,7 +2036,7 @@ export default function BulkEdit() {
                 Continue to Configure →
               </button>
             </div>
-          </s-box>
+          </div>
         </s-section>
       )}
 
