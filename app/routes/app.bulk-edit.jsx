@@ -2046,7 +2046,7 @@ export default function BulkEdit() {
           <s-box padding="base">
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "8px" }}>
               <div style={{ minWidth: 0 }}>
-                <div style={{ fontWeight: 700, fontSize: "16px", color: "#202223" }}>Apply Modifications</div>
+                <div style={{ fontWeight: 700, fontSize: "16px", color: "#202223" }}>Add Modifications</div>
                 <div style={{ fontSize: "13px", color: "#637381", marginTop: "4px" }}>
                   Editing {selectedIds.size} product{selectedIds.size !== 1 ? "s" : ""} ({totalVariants} variant{totalVariants !== 1 ? "s" : ""})
                 </div>
@@ -2073,7 +2073,7 @@ export default function BulkEdit() {
                   <div style={{ fontSize: "32px", marginBottom: "8px" }}>⚡</div>
                   <div style={{ fontSize: "15px", fontWeight: 600, marginBottom: "4px" }}>Add a modification to get started</div>
                   <div style={{ fontSize: "13px", color: "#637381", marginBottom: "16px" }}>Edit any product field: price, title, vendor, tags, status, metafields, and more</div>
-                  <button onClick={() => { addMod(); setActivePreset(null); }} style={styles.primaryBtn(true)}>Apply Modifications</button>
+                  <button onClick={() => { addMod(); setActivePreset(null); }} style={styles.primaryBtn(true)}>Add Modifications</button>
                   <div style={{ marginTop: "16px", display: "flex", gap: "6px", flexWrap: "wrap", justifyContent: "center" }}>
                     {QUICK_PRESETS.slice(0, 4).map((preset, idx) => (
                       <button key={idx} style={{ ...styles.presetBtn(activePreset === idx), padding: "8px 12px", minWidth: "60px" }} onClick={() => applyPreset(preset, idx)} title={preset.description || preset.label}>
