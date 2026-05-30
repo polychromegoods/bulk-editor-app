@@ -50,6 +50,10 @@ export default function App() {
         <s-link href="/app/settings">Settings</s-link>
         <s-link href="/app/support">Support</s-link>
       </s-app-nav>
+      {/* Global fix: prevent Shopify mobile nav bar from covering bottom content on iOS */}
+      <style dangerouslySetInnerHTML={{ __html: `
+        s-page { padding-bottom: 120px !important; }
+      ` }} />
       <Outlet />
     </AppProvider>
   );
