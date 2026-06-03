@@ -30,7 +30,7 @@ export const loader = async ({ request }) => {
               edges {
                 node {
                   id title price compareAtPrice sku barcode inventoryQuantity
-                  inventoryItem { measurement { weight { value unit } } }
+                  inventoryItem { id tracked measurement { weight { value unit } } }
                 }
               }
             }
@@ -57,6 +57,7 @@ export const loader = async ({ request }) => {
               edges {
                 node {
                   id title price compareAtPrice sku barcode inventoryQuantity
+                  inventoryItem { id tracked }
                 }
               }
             }
@@ -267,7 +268,7 @@ export const action = async ({ request }) => {
         // Separate product-level, variant-level, and metafield changes
         const metafieldChanges = productChanges.filter(c => c.field.startsWith("metafield::"));
         const productLevelChanges = productChanges.filter(c => ["title", "handle", "vendor", "productType", "status", "tags", "templateSuffix"].includes(c.field));
-        const variantLevelChanges = productChanges.filter(c => ["price", "compareAtPrice", "sku", "barcode", "weight", "taxable"].includes(c.field));
+        const variantLevelChanges = productChanges.filter(c => ["price", "compareAtPrice", "sku", "barcode", "weight", "taxable", "tracked"].includes(c.field));
 
         // Apply metafield changes via metafieldsSet
         if (metafieldChanges.length > 0) {
@@ -435,6 +436,10 @@ export const action = async ({ request }) => {
                 unit: "POUNDS",
               };
             }
+            else if (change.field === "tracked") {
+              v.inventoryItem = v.inventoryItem || {};
+              v.inventoryItem.tracked = change.newValue === "true";
+            }
 
           }
 
@@ -563,7 +568,7 @@ export const action = async ({ request }) => {
                 edges {
                   node {
                     id title price compareAtPrice sku barcode inventoryQuantity
-                    inventoryItem { measurement { weight { value unit } } }
+                    inventoryItem { id tracked measurement { weight { value unit } } }
                   }
                 }
               }
@@ -588,6 +593,7 @@ export const action = async ({ request }) => {
                 edges {
                   node {
                     id title price compareAtPrice sku barcode inventoryQuantity
+                    inventoryItem { id tracked }
                   }
                 }
               }
@@ -691,6 +697,14 @@ export const action = async ({ request }) => {
             else if (c.field === "compareAtPrice") v.compareAtPrice = c.oldValue;
             else if (c.field === "sku") v.sku = c.oldValue;
             else if (c.field === "barcode") v.barcode = c.oldValue;
+            else if (c.field === "weight") {
+              v.inventoryItem = v.inventoryItem || {};
+              v.inventoryItem.measurement = { weight: { value: parseFloat(c.oldValue), unit: "POUNDS" } };
+            }
+            else if (c.field === "tracked") {
+              v.inventoryItem = v.inventoryItem || {};
+              v.inventoryItem.tracked = c.oldValue === "true";
+            }
             return v;
           });
           await admin.graphql(`#graphql
@@ -723,6 +737,7 @@ const BASE_EDITABLE_FIELDS = [
   { value: "sku", label: "SKU", icon: "🔢", category: "text", level: "variant", accessor: (v) => v.sku || "" },
   { value: "barcode", label: "Barcode", icon: "📊", category: "text", level: "variant", accessor: (v) => v.barcode || "" },
   { value: "weight", label: "Weight", icon: "⚖️", category: "numeric", level: "variant", accessor: (v) => { const w = v.inventoryItem?.measurement?.weight?.value; return w != null ? String(w) : "0"; } },
+  { value: "tracked", label: "Inventory Tracked", icon: "📦", category: "select", level: "variant", accessor: (v) => v.inventoryItem?.tracked ? "true" : "false", options: ["true", "false"] },
   // Text (product-level)
   { value: "title", label: "Title", icon: "📝", category: "text", level: "product", accessor: null },
   { value: "handle", label: "Handle (URL)", icon: "🔗", category: "text", level: "product", accessor: null },
@@ -881,6 +896,7 @@ const FILTER_FIELDS = [
   { value: "compareAtPrice", label: "Compare-at Price", type: "number" },
   { value: "inventoryQuantity", label: "Inventory", type: "number" },
   { value: "weight", label: "Weight", type: "number" },
+  { value: "tracked", label: "Inventory Tracked", type: "select", options: ["true", "false"] },
   { value: "templateSuffix", label: "Product Template", type: "text" },
   // ── Metafield filters (Google Shopping) ──
   { value: "metafield::mm-google-shopping::custom_label_0", label: "Google Custom Label 0", type: "text", isMetafield: true },
@@ -957,6 +973,9 @@ function evaluateFilter(product, rule) {
         break;
       case "weight":
         value = String(product.variants?.edges?.[0]?.node?.inventoryItem?.measurement?.weight?.value ?? "0");
+        break;
+      case "tracked":
+        value = product.variants?.edges?.[0]?.node?.inventoryItem?.tracked ? "true" : "false";
         break;
       case "templateSuffix":
         value = product.templateSuffix || "";

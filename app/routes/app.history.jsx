@@ -123,7 +123,7 @@ export const action = async ({ request }) => {
       try {
         // Separate product-level and variant-level changes
         const productLevelFields = ["title", "vendor", "productType", "status", "tags", "templateSuffix", "handle"];
-        const variantLevelFields = ["price", "compareAtPrice", "sku", "barcode", "weight", "taxable", "cost"];
+        const variantLevelFields = ["price", "compareAtPrice", "sku", "barcode", "weight", "taxable", "cost", "tracked"];
         const productLevelRecs = recs.filter(r => productLevelFields.includes(r.changeType));
         const variantLevelRecs = recs.filter(r => variantLevelFields.includes(r.changeType) || !productLevelFields.includes(r.changeType));
 
@@ -199,7 +199,11 @@ export const action = async ({ request }) => {
             } else if (field === "taxable") {
               variantMap[rec.variantId].taxable = rec.oldPrice === "true";
             } else if (field === "cost") {
-              variantMap[rec.variantId].inventoryItem = { cost: parseFloat(rec.oldPrice) || 0 };
+              variantMap[rec.variantId].inventoryItem = variantMap[rec.variantId].inventoryItem || {};
+              variantMap[rec.variantId].inventoryItem.cost = parseFloat(rec.oldPrice) || 0;
+            } else if (field === "tracked") {
+              variantMap[rec.variantId].inventoryItem = variantMap[rec.variantId].inventoryItem || {};
+              variantMap[rec.variantId].inventoryItem.tracked = rec.oldPrice === "true";
             }
           }
 
